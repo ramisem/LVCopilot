@@ -3,10 +3,7 @@ import os
 import re
 # pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
-try:
-    from .agent import LVDeveloperAgent
-except ImportError:
-    from agent import LVDeveloperAgent
+from .agent import LVDeveloperAgent
 
 def ensure_api_key():
     # Load from current directory .env

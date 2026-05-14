@@ -39,7 +39,7 @@ jobs:
           pyinstaller --name lvcopilot-${{ runner.os }} --onefile \
             --add-data "lvcopilot/md_files:lvcopilot/md_files" \
             --add-data "lvcopilot/skills:lvcopilot/skills" \
-            lvcopilot/main.py
+            run.py
 
       - name: Build executable with PyInstaller (Windows)
         if: runner.os == 'Windows'
@@ -47,7 +47,7 @@ jobs:
           pyinstaller --name lvcopilot-${{ runner.os }}.exe --onefile `
             --add-data "lvcopilot/md_files;lvcopilot/md_files" `
             --add-data "lvcopilot/skills;lvcopilot/skills" `
-            lvcopilot/main.py
+            run.py
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
