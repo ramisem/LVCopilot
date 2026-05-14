@@ -18,7 +18,7 @@ setup(
     description='Autonomous LabVantage Developer Agent',
     packages=find_packages(),
     install_requires=[
-        'google-generativeai',
+        'litellm',
         'python-dotenv'
     ],
     entry_points={

@@ -5,34 +5,71 @@ import re
 from dotenv import load_dotenv
 from .agent import LVDeveloperAgent
 
-def ensure_api_key():
+def configure_llm():
     # Load from current directory .env
     env_path = os.path.join(os.getcwd(), '.env')
     if os.path.exists(env_path):
         load_dotenv(dotenv_path=env_path)
         
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key or api_key == "your_api_key_here":
-        print("GEMINI_API_KEY not found in the current project.")
+    # Check for old GEMINI_API_KEY migration
+    old_api_key = os.environ.get("GEMINI_API_KEY")
+    if old_api_key and old_api_key != "your_api_key_here" and not os.environ.get("LLM_MODEL"):
+        print("Migrating existing GEMINI_API_KEY configuration...")
+        os.environ["LLM_MODEL"] = "gemini/gemini-2.5-flash"
+        os.environ["LLM_API_KEY"] = old_api_key
         try:
-            api_key = input("Please enter your Gemini API Key: ").strip()
-        except EOFError:
-            api_key = ""
+            with open(env_path, 'a') as f:
+                f.write(f"\nLLM_MODEL=gemini/gemini-2.5-flash\nLLM_API_KEY={old_api_key}\n")
+        except Exception:
+            pass
+
+    llm_model = os.environ.get("LLM_MODEL")
+    llm_api_key = os.environ.get("LLM_API_KEY")
+    llm_api_base = os.environ.get("LLM_API_BASE")
+    
+    if not llm_model:
+        print("LLM Configuration not found in the current project.")
+        print("Supported formats:")
+        print("  - OpenAI: gpt-4o, gpt-4-turbo")
+        print("  - Gemini: gemini/gemini-2.5-flash, gemini/gemini-pro")
+        print("  - Anthropic: anthropic/claude-3-opus-20240229")
+        print("  - Ollama: ollama/llama3")
+        try:
+            llm_model = input("Please enter the LLM Model you want to use [default: gemini/gemini-2.5-flash]: ").strip()
+            if not llm_model:
+                llm_model = "gemini/gemini-2.5-flash"
+                
+            needs_key = not llm_model.startswith("ollama/")
+            if needs_key:
+                llm_api_key = input("Please enter your API Key: ").strip()
+                if not llm_api_key:
+                    print("API Key is required for this model. Exiting.")
+                    sys.exit(1)
+                    
+            llm_api_base = input("Please enter your API Base URL (optional, press Enter to skip): ").strip()
             
-        if not api_key:
-            print("API Key is required. Exiting.")
+        except EOFError:
+            print("\nConfiguration aborted. Exiting.")
             sys.exit(1)
             
         # Save to .env in current directory
         try:
             with open(env_path, 'a') as f:
-                f.write(f"\nGEMINI_API_KEY={api_key}\n")
-            print(f"API Key saved to {env_path}")
+                f.write(f"\nLLM_MODEL={llm_model}\n")
+                if llm_api_key:
+                    f.write(f"LLM_API_KEY={llm_api_key}\n")
+                if llm_api_base:
+                    f.write(f"LLM_API_BASE={llm_api_base}\n")
+            print(f"LLM Configuration saved to {env_path}")
         except Exception as e:
-            print(f"Warning: Could not save API Key to {env_path}: {e}")
+            print(f"Warning: Could not save LLM Configuration to {env_path}: {e}")
             
         # Update environ for the current run
-        os.environ["GEMINI_API_KEY"] = api_key
+        os.environ["LLM_MODEL"] = llm_model
+        if llm_api_key:
+            os.environ["LLM_API_KEY"] = llm_api_key
+        if llm_api_base:
+            os.environ["LLM_API_BASE"] = llm_api_base
 
 def process_at_references(user_input):
     # Match @ followed by non-space characters
@@ -154,9 +191,9 @@ def main():
     print("  Initializing Autonomous LV Developer Agent CLI...")
     print("=" * 60 + "\n")
     
-    ensure_api_key()
+    configure_llm()
     
-    print("  Loading Knowledge Base and configuring Gemini...")
+    print("  Loading Knowledge Base and configuring LLM...")
     try:
         agent = LVDeveloperAgent()
         initial_greeting = agent.start()

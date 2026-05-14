@@ -1,9 +1,7 @@
 import os
-# pyrefly: ignore [missing-import]
-import google.generativeai as genai
-# pyrefly: ignore [missing-import]
 import sys
 # pyrefly: ignore [missing-import]
+import litellm
 from dotenv import load_dotenv
 
 # load_dotenv() is handled in main.py per project directory
@@ -44,12 +42,11 @@ Once the Architect confirms the implementation in Phase 3, transition to Phase 4
 
 class LVDeveloperAgent:
     def __init__(self):
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key or api_key == "your_api_key_here":
-            raise ValueError("Invalid GEMINI_API_KEY. Please update the .env file.")
+        self.model_name = os.environ.get("LLM_MODEL", "gemini/gemini-2.5-flash")
+        self.api_key = os.environ.get("LLM_API_KEY")
+        self.api_base = os.environ.get("LLM_API_BASE")
         
-        genai.configure(api_key=api_key)
-        self.chat_session = None
+        self.messages = []
         
     def load_knowledge_base(self):
         # Handle PyInstaller frozen executable path
@@ -92,17 +89,32 @@ class LVDeveloperAgent:
         knowledge_context = self.load_knowledge_base()
         full_system_prompt = SYSTEM_PROMPT + "\n\n" + knowledge_context
         
-        self.model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
-            system_instruction=full_system_prompt
-        )
-        
-        self.chat_session = self.model.start_chat(history=[])
+        self.messages = [
+            {"role": "system", "content": full_system_prompt}
+        ]
         
         # Initiate the conversation to trigger Phase 1
-        response = self.chat_session.send_message("Initiate Phase 1 and ask for the Business Requirement. Keep it brief.")
-        return response.text
+        return self.send_message("Initiate Phase 1 and ask for the Business Requirement. Keep it brief.")
         
     def send_message(self, message):
-        response = self.chat_session.send_message(message)
-        return response.text
+        self.messages.append({"role": "user", "content": message})
+        
+        kwargs = {
+            "model": self.model_name,
+            "messages": self.messages
+        }
+        
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+            
+        try:
+            response = litellm.completion(**kwargs)
+            response_text = response.choices[0].message.content
+            self.messages.append({"role": "assistant", "content": response_text})
+            return response_text
+        except Exception as e:
+            # Revert the user message if the call fails
+            self.messages.pop()
+            raise e
