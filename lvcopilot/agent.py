@@ -50,8 +50,9 @@ class LVDeveloperAgent:
         
     def load_knowledge_base(self):
         # Handle PyInstaller frozen executable path
+        # The --add-data flags bundle to lvcopilot/md_files and lvcopilot/skills
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-            base_dir = sys._MEIPASS
+            base_dir = os.path.join(sys._MEIPASS, 'lvcopilot')
         else:
             # Prefer local script directory for development
             base_dir = os.path.dirname(os.path.abspath(__file__))
