@@ -7,10 +7,68 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
+# pyrefly: ignore [missing-import]
+from prompt_toolkit import PromptSession
+# pyrefly: ignore [missing-import]
+from prompt_toolkit.formatted_text import HTML
+# pyrefly: ignore [missing-import]
+from prompt_toolkit.key_binding import KeyBindings
 from .agent import LVDeveloperAgent
 from . import file_merger
 
 console = Console()
+
+
+def _find_at_token(text):
+    """Find the @path token at the end of text. Returns (start_index, path_prefix) or None."""
+    # Walk backwards to find the last @ that starts a token
+    i = len(text) - 1
+    while i >= 0:
+        if text[i] == '@' and (i == 0 or text[i - 1].isspace()):
+            path_prefix = text[i + 1:]
+            if ' ' not in path_prefix:
+                return i, path_prefix
+        if text[i].isspace():
+            break
+        i -= 1
+    return None
+
+
+def _list_matches(path_prefix):
+    """List filesystem matches for a partial path. Returns list of (name, is_dir) tuples."""
+    expanded = os.path.expanduser(path_prefix)
+    if os.path.isdir(expanded):
+        dirname, basename = expanded, ''
+    else:
+        dirname, basename = os.path.dirname(expanded), os.path.basename(expanded)
+    if not dirname:
+        dirname = '.'
+    if not os.path.isdir(dirname):
+        return []
+    try:
+        items = sorted(os.listdir(dirname))
+    except OSError:
+        return []
+    matches = []
+    for item in items:
+        if item.startswith(basename):
+            full = os.path.join(dirname, item)
+            matches.append((item, os.path.isdir(full)))
+    return matches
+
+
+def _longest_common_prefix(names):
+    """Return the longest common prefix of a list of strings."""
+    if not names:
+        return ''
+    prefix = names[0]
+    for name in names[1:]:
+        while not name.startswith(prefix):
+            prefix = prefix[:-1]
+            if not prefix:
+                return ''
+    return prefix
+
 
 def configure_llm():
     # Load from current directory .lvcopilotenv
@@ -102,6 +160,11 @@ def process_at_references(user_input):
                     console.print(f"[bold yellow]Warning: Could not list directory {filepath}: {e}[/bold yellow]")
     
     if context:
+        # Remove the '@' symbol from valid paths in the prompt so the agent sees normal file paths
+        for match in matches:
+            if os.path.exists(match):
+                user_input = user_input.replace(f"@{match}", match)
+        
         user_input += "\n\n[System Context injected based on user @ references]:" + context
         
     return user_input
@@ -372,9 +435,70 @@ def main():
         
     console.print(Panel(Markdown(initial_greeting), title="🤖 LV Agent", border_style="blue"))
     
+    # Shell-style Tab completion for @paths — inline cycling (no dropdown, no printing)
+    # State for cycling through multiple matches
+    _tab_state = {'cycling': False, 'matches': [], 'index': 0,
+                  'basename_len': 0, 'insert_len': 0, 'cursor_after': 0}
+    kb = KeyBindings()
+
+    @kb.add('tab')
+    def _(event):
+        buf = event.current_buffer
+        
+        # If we are currently cycling and cursor hasn't moved, cycle to next match
+        if _tab_state['cycling'] and buf.cursor_position == _tab_state['cursor_after']:
+            buf.delete_before_cursor(_tab_state['insert_len'])
+            _tab_state['index'] = (_tab_state['index'] + 1) % len(_tab_state['matches'])
+            name, is_dir = _tab_state['matches'][_tab_state['index']]
+            suffix = name[_tab_state['basename_len']:] + ('/' if is_dir else '')
+            buf.insert_text(suffix)
+            _tab_state['insert_len'] = len(suffix)
+            _tab_state['cursor_after'] = buf.cursor_position
+            return
+        
+        # Fresh Tab press — reset cycling state
+        _tab_state['cycling'] = False
+        
+        text = buf.text[:buf.cursor_position]
+        result = _find_at_token(text)
+        if result is None:
+            return
+        at_index, path_prefix = result
+        matches = _list_matches(path_prefix)
+        if not matches:
+            return
+
+        expanded = os.path.expanduser(path_prefix)
+        basename = '' if os.path.isdir(expanded) else os.path.basename(expanded)
+
+        if len(matches) == 1:
+            # Single match: complete it inline
+            name, is_dir = matches[0]
+            suffix = name[len(basename):] + ('/' if is_dir else '')
+            buf.insert_text(suffix)
+        else:
+            # Multiple matches: try common prefix first
+            names = [m[0] for m in matches]
+            lcp = _longest_common_prefix(names)
+            if len(lcp) > len(basename):
+                buf.insert_text(lcp[len(basename):])
+            else:
+                # No common prefix to add — start cycling through matches
+                _tab_state['cycling'] = True
+                _tab_state['matches'] = matches
+                _tab_state['index'] = 0
+                _tab_state['basename_len'] = len(basename)
+                name, is_dir = matches[0]
+                suffix = name[len(basename):] + ('/' if is_dir else '')
+                buf.insert_text(suffix)
+                _tab_state['insert_len'] = len(suffix)
+                _tab_state['cursor_after'] = buf.cursor_position
+
+    session = PromptSession(key_bindings=kb)
+    
     while True:
         try:
-            user_input = console.input("\n[bold cyan]👤 Architect (type 'exit' to quit): [/bold cyan]")
+            user_input = session.prompt(HTML("\n<ansicyan><b>👤 Architect (type 'exit' to quit): </b></ansicyan>"))
             if user_input.lower() in ['exit', 'quit']:
                 console.print("[bold green]Goodbye![/bold green]")
                 break
@@ -397,4 +521,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

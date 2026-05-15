@@ -20,7 +20,8 @@ setup(
     install_requires=[
         'litellm',
         'python-dotenv',
-        'rich'
+        'rich',
+        'prompt_toolkit'
     ],
     entry_points={
         'console_scripts': [
