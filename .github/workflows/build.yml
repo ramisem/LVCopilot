@@ -39,6 +39,8 @@ jobs:
           pyinstaller --name lvcopilot-${{ runner.os }} --onefile \
             --add-data "lvcopilot/md_files:lvcopilot/md_files" \
             --add-data "lvcopilot/skills:lvcopilot/skills" \
+            --collect-data litellm \
+            --copy-metadata litellm \
             run.py
 
       - name: Build executable with PyInstaller (Windows)
@@ -47,6 +49,8 @@ jobs:
           pyinstaller --name lvcopilot-${{ runner.os }}.exe --onefile `
             --add-data "lvcopilot/md_files;lvcopilot/md_files" `
             --add-data "lvcopilot/skills;lvcopilot/skills" `
+            --collect-data litellm `
+            --copy-metadata litellm `
             run.py
 
       - name: Upload Artifact
