@@ -4,10 +4,11 @@ import re
 # pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 from .agent import LVDeveloperAgent
+from . import file_merger
 
 def configure_llm():
-    # Load from current directory .env
-    env_path = os.path.join(os.getcwd(), '.env')
+    # Load from current directory .lvcopilotenv
+    env_path = os.path.join(os.getcwd(), '.lvcopilotenv')
     if os.path.exists(env_path):
         load_dotenv(dotenv_path=env_path)
         
@@ -52,7 +53,7 @@ def configure_llm():
             print("\nConfiguration aborted. Exiting.")
             sys.exit(1)
             
-        # Save to .env in current directory
+        # Save to .lvcopilotenv in current directory
         try:
             with open(env_path, 'a') as f:
                 f.write(f"\nLLM_MODEL={llm_model}\n")
@@ -99,7 +100,7 @@ def process_at_references(user_input):
         
     return user_input
 
-def process_and_save_files(response):
+def process_and_save_files(response, agent):
     # Only prompt for file saving if we are in Phase 4
     if not re.search(r'\[Phase:\s*4\]', response, re.IGNORECASE):
         return
@@ -113,11 +114,14 @@ def process_and_save_files(response):
 
     print("\n--- Code Generation Detected ---")
     
+    # ── Phase 1: Pre-scan — collect all file entries and resolve paths ──
+    file_entries = []
+    
     for match in matches:
         lang = match.group(1)
         code = match.group(2)
         
-        # We can look at the text before this match to find a filename
+        # Look at text before this match to find a filename
         start_idx = match.start()
         text_before = response[:start_idx]
         
@@ -131,59 +135,226 @@ def process_and_save_files(response):
         path_pattern = r'([a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9]{2,})'
         path_match = re.search(path_pattern, last_line)
         if path_match:
-            # We extract just the basename so the agent only decides the file name
+            # Extract just the basename so the agent only decides the file name
             filename = os.path.basename(path_match.group(1).strip())
-            # Clean up common markdown artifacts just in case
-            filename = filename.strip('*_`\"\'')
-            
+            # Clean up common markdown artifacts
+            filename = filename.strip('*_`\"\' ')
+        
+        file_entries.append({
+            'filename': filename,
+            'lang': lang,
+            'code': code,
+            'abs_path': None,
+            'exists': False,
+            'existing_content': None
+        })
+    
+    # ── Phase 2: Resolve paths — prompt user for directory/path per file ──
+    resolved_entries = []
+    
+    for entry in file_entries:
+        filename = entry['filename']
+        lang = entry['lang']
+        
         if filename:
             print(f"\n[LVCopilot] Found code for: {filename}")
             choice = input(f"Do you want to save this file? (y/n): ").strip().lower()
         else:
             print(f"\n[LVCopilot] Found a {lang if lang else 'code'} block without a clear file name.")
             choice = input("Do you want to save this code block? (y/n): ").strip().lower()
-            
-        if choice == 'y':
-            while True:
-                if filename:
-                    location = input(f"Enter the directory path to save '{filename}' to (e.g., ./src/actions/): ").strip()
-                    if not location:
-                        print("Validation Error: Directory path cannot be empty.")
-                        continue
+        
+        if choice != 'y':
+            print(f"⏭️  Skipped.")
+            continue
+        
+        # Get the target path from user
+        while True:
+            if filename:
+                location = input(f"Enter the directory path to save '{filename}' to (e.g., ./src/actions/): ").strip()
+                if not location:
+                    print("Validation Error: Directory path cannot be empty.")
+                    continue
+                
+                expanded_location = os.path.expanduser(location)
+                final_path = os.path.join(expanded_location, filename)
+            else:
+                filepath_input = input("Enter the full file path (including file name) to save to: ").strip()
+                
+                if not filepath_input:
+                    print("Validation Error: File path cannot be empty. Please provide the file name along with the file path.")
+                    continue
                     
-                    expanded_location = os.path.expanduser(location)
-                    final_path = os.path.join(expanded_location, filename)
-                else:
-                    filepath = input("Enter the full file path (including file name) to save to: ").strip()
+                if filepath_input.endswith('/') or filepath_input.endswith('\\'):
+                    print("Validation Error: You provided a directory path. Please provide the file name along with the file path.")
+                    continue
                     
-                    if not filepath:
-                        print("Validation Error: File path cannot be empty. Please provide the file name along with the file path.")
-                        continue
-                        
-                    if filepath.endswith('/') or filepath.endswith('\\'):
-                        print("Validation Error: You provided a directory path. Please provide the file name along with the file path.")
-                        continue
-                        
-                    expanded_path = os.path.expanduser(filepath)
-                    if os.path.isdir(expanded_path):
-                        print(f"Validation Error: '{filepath}' is an existing directory. Please provide the file name along with the file path.")
-                        continue
-                        
-                    final_path = expanded_path
+                expanded_path = os.path.expanduser(filepath_input)
+                if os.path.isdir(expanded_path):
+                    print(f"Validation Error: '{filepath_input}' is an existing directory. Please provide the file name along with the file path.")
+                    continue
                     
-                break
-
-            try:
-                # Expand ~ to user home directory
-                abs_path = os.path.abspath(final_path)
-                os.makedirs(os.path.dirname(abs_path) or '.', exist_ok=True)
-                with open(abs_path, 'w', encoding='utf-8') as f:
-                    f.write(code)
-                print(f"✅ Saved to: {abs_path}")
-            except Exception as e:
-                print(f"❌ Error saving to {abs_path if 'abs_path' in locals() else final_path}: {e}")
+                final_path = expanded_path
+                filename = os.path.basename(final_path)
+                
+            break
+        
+        abs_path = os.path.abspath(final_path)
+        exists, existing_content = file_merger.detect_existing_file(abs_path)
+        
+        entry['filename'] = filename
+        entry['abs_path'] = abs_path
+        entry['exists'] = exists
+        entry['existing_content'] = existing_content
+        resolved_entries.append(entry)
+    
+    if not resolved_entries:
+        return
+    
+    # ── Phase 3: Summary display ──
+    existing_entries = [e for e in resolved_entries if e['exists']]
+    new_entries = [e for e in resolved_entries if not e['exists']]
+    
+    print("\n--- File Summary ---")
+    for entry in resolved_entries:
+        status = "[UPDATE]" if entry['exists'] else "[NEW]   "
+        print(f"  {status} {entry['filename']:<30} → {entry['abs_path']}")
+    print("")
+    
+    # ── Phase 4: Determine batch action for existing files ──
+    batch_action = None  # None means new-only, 'm', 'o', 's', or 'p'
+    
+    if existing_entries:
+        print(f"⚠️  {len(existing_entries)} of {len(resolved_entries)} file(s) already exist.")
+        
+        if len(existing_entries) == 1:
+            # Single existing file — go directly to per-file mode
+            batch_action = 'p'
         else:
-            print(f"⏭️  Skipped saving.")
+            # Multiple existing files — offer batch options
+            while True:
+                print("Choose action for existing files:")
+                print("  (m) Merge all   — smart LLM merge for all existing files")
+                print("  (o) Overwrite all — replace all existing files with new content")
+                print("  (s) Skip all    — skip all existing files, only save new ones")
+                print("  (p) Per-file    — decide individually for each file")
+                batch_choice = input("Your choice [m/o/s/p]: ").strip().lower()
+                if batch_choice in ('m', 'o', 's', 'p'):
+                    batch_action = batch_choice
+                    break
+                print("Invalid choice. Please enter m, o, s, or p.")
+    
+    # ── Phase 5: Process each file ──
+    merge_max_lines = file_merger.get_merge_max_lines()
+    
+    for entry in resolved_entries:
+        filename = entry['filename']
+        code = entry['code']
+        abs_path = entry['abs_path']
+        exists = entry['exists']
+        existing_content = entry['existing_content']
+        
+        if not exists:
+            # New file — write directly
+            _write_new_file(abs_path, code, filename)
+            continue
+        
+        # Existing file — determine action
+        action = batch_action
+        
+        if action == 'p':
+            # Per-file prompt
+            while True:
+                file_choice = input(f"  {filename}: (m)erge, (o)verwrite, or (s)kip? [m/o/s]: ").strip().lower()
+                if file_choice in ('m', 'o', 's'):
+                    action = file_choice
+                    break
+                print("  Invalid choice. Please enter m, o, or s.")
+        
+        if action == 's':
+            print(f"  ⏭️  Skipped: {filename}")
+            continue
+        
+        if action == 'o':
+            # Overwrite — backup first, then write
+            file_merger.create_backup(abs_path)
+            _write_new_file(abs_path, code, filename)
+            continue
+        
+        if action == 'm':
+            # Merge — check file size, call LLM, show diff, confirm
+            _perform_merge(agent, entry, merge_max_lines)
+            continue
+
+
+def _perform_merge(agent, entry, merge_max_lines):
+    """Handle the LLM-based merge workflow for a single file.
+    
+    Args:
+        agent: The LVDeveloperAgent instance.
+        entry: File entry dict with filename, code, abs_path, existing_content.
+        merge_max_lines: Max line threshold from MERGE_MAX_LINES env var.
+    """
+    filename = entry['filename']
+    abs_path = entry['abs_path']
+    existing_content = entry['existing_content']
+    proposed_content = entry['code']
+    
+    if existing_content is None:
+        print(f"  ⚠️  Could not read existing file: {filename}. Falling back to overwrite.")
+        file_merger.create_backup(abs_path)
+        _write_new_file(abs_path, proposed_content, filename)
+        return
+    
+    # Check file size against threshold
+    line_count = len(existing_content.splitlines())
+    if line_count > merge_max_lines:
+        print(f"  ⚠️  File has {line_count} lines (limit: {merge_max_lines}). LLM merge may consume significant tokens.")
+        proceed = input("  Proceed with merge? (y/n): ").strip().lower()
+        if proceed != 'y':
+            print(f"  ⏭️  Skipped merge for: {filename}")
+            return
+    
+    # Call LLM for merge
+    print(f"  🔄 Merging {filename}...")
+    try:
+        merged_content = file_merger.merge_files(agent, existing_content, proposed_content, filename)
+    except Exception as e:
+        print(f"  ❌ Merge failed: {e}")
+        fallback = input("  Do you want to (o)verwrite or (s)kip? [o/s]: ").strip().lower()
+        if fallback == 'o':
+            file_merger.create_backup(abs_path)
+            _write_new_file(abs_path, proposed_content, filename)
+        else:
+            print(f"  ⏭️  Skipped: {filename}")
+        return
+    
+    # Show diff
+    file_merger.show_diff(existing_content, merged_content, filename)
+    
+    # Confirm before writing
+    confirm = input(f"  Write merged content to {filename}? (y/n): ").strip().lower()
+    if confirm == 'y':
+        file_merger.create_backup(abs_path)
+        _write_new_file(abs_path, merged_content, filename)
+    else:
+        print(f"  ⏭️  Merge discarded for: {filename}")
+
+
+def _write_new_file(abs_path, content, filename):
+    """Write content to a file, creating directories as needed.
+    
+    Args:
+        abs_path: Absolute path to write to.
+        content: File content string.
+        filename: Filename for display purposes.
+    """
+    try:
+        os.makedirs(os.path.dirname(abs_path) or '.', exist_ok=True)
+        with open(abs_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"  ✅ Saved to: {abs_path}")
+    except Exception as e:
+        print(f"  ❌ Error saving {filename}: {e}")
 
 
 def main():
@@ -220,7 +391,7 @@ def main():
             processed_input = process_at_references(user_input)
             response = agent.send_message(processed_input)
             print(f"🤖 LV Agent:\n{response}\n")
-            process_and_save_files(response)
+            process_and_save_files(response, agent)
             
         except KeyboardInterrupt:
             print("\nExiting...")
@@ -230,3 +401,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

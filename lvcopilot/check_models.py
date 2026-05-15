@@ -4,10 +4,10 @@ import google.generativeai as genai
 # pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.getcwd(), '.lvcopilotenv'))
 api_key = os.environ.get("GEMINI_API_KEY")
 if not api_key or api_key == "your_api_key_here":
-    print("No valid API Key found in .env.")
+    print("No valid API Key found in .lvcopilotenv.")
     exit(1)
 
 genai.configure(api_key=api_key)

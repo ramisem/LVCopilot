@@ -53,7 +53,7 @@ LVCopilot is an autonomous LabVantage (LV) Senior Developer agent powered by Goo
 
 4. **Configure your API Key:**
 
-   You no longer need to manually create a `.env` file! Just run the CLI tool in any directory. If an API key is missing for that specific project, it will prompt you securely in the terminal and automatically generate the `.env` file for you.
+   You no longer need to manually create a `.lvcopilotenv` file! Just run the CLI tool in any directory. If an API key is missing for that specific project, it will prompt you securely in the terminal and automatically generate the `.lvcopilotenv` file for you.
 
 ## Usage
 

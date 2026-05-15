@@ -119,3 +119,29 @@ class LVDeveloperAgent:
             # Revert the user message if the call fails
             self.messages.pop()
             raise e
+
+    def merge_content(self, merge_prompt):
+        """One-shot LLM call for file merging — does not affect conversation history.
+        
+        Args:
+            merge_prompt: The merge prompt containing existing and proposed content.
+        
+        Returns:
+            str: The merged file content from the LLM.
+        """
+        kwargs = {
+            "model": self.model_name,
+            "messages": [
+                {"role": "system", "content": "You are a code merge assistant. You receive an existing file and proposed changes. Output ONLY the merged file content — no markdown fences, no explanations, no preamble."},
+                {"role": "user", "content": merge_prompt}
+            ]
+        }
+        
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        
+        response = litellm.completion(**kwargs)
+        return response.choices[0].message.content
+
