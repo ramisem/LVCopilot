@@ -3,8 +3,14 @@ import os
 import re
 # pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.prompt import Prompt, Confirm
 from .agent import LVDeveloperAgent
 from . import file_merger
+
+console = Console()
 
 def configure_llm():
     # Load from current directory .lvcopilotenv
@@ -15,7 +21,7 @@ def configure_llm():
     # Check for old GEMINI_API_KEY migration
     old_api_key = os.environ.get("GEMINI_API_KEY")
     if old_api_key and old_api_key != "your_api_key_here" and not os.environ.get("LLM_MODEL"):
-        print("Migrating existing GEMINI_API_KEY configuration...")
+        console.print("[yellow]Migrating existing GEMINI_API_KEY configuration...[/yellow]")
         os.environ["LLM_MODEL"] = "gemini/gemini-2.5-flash"
         os.environ["LLM_API_KEY"] = old_api_key
         try:
@@ -29,28 +35,28 @@ def configure_llm():
     llm_api_base = os.environ.get("LLM_API_BASE")
     
     if not llm_model:
-        print("LLM Configuration not found in the current project.")
-        print("Supported formats:")
-        print("  - OpenAI: gpt-4o, gpt-4-turbo")
-        print("  - Gemini: gemini/gemini-2.5-flash, gemini/gemini-pro")
-        print("  - Anthropic: anthropic/claude-3-opus-20240229")
-        print("  - Ollama: ollama/llama3")
+        console.print("[yellow]LLM Configuration not found in the current project.[/yellow]")
+        console.print("Supported formats:")
+        console.print("  - OpenAI: [cyan]gpt-4o, gpt-4-turbo[/cyan]")
+        console.print("  - Gemini: [cyan]gemini/gemini-2.5-flash, gemini/gemini-pro[/cyan]")
+        console.print("  - Anthropic: [cyan]anthropic/claude-3-opus-20240229[/cyan]")
+        console.print("  - Ollama: [cyan]ollama/llama3[/cyan]")
         try:
-            llm_model = input("Please enter the LLM Model you want to use [default: gemini/gemini-2.5-flash]: ").strip()
+            llm_model = Prompt.ask("Please enter the LLM Model you want to use", default="gemini/gemini-2.5-flash").strip()
             if not llm_model:
                 llm_model = "gemini/gemini-2.5-flash"
                 
             needs_key = not llm_model.startswith("ollama/")
             if needs_key:
-                llm_api_key = input("Please enter your API Key: ").strip()
+                llm_api_key = Prompt.ask("Please enter your API Key", password=True).strip()
                 if not llm_api_key:
-                    print("API Key is required for this model. Exiting.")
+                    console.print("[bold red]API Key is required for this model. Exiting.[/bold red]")
                     sys.exit(1)
                     
-            llm_api_base = input("Please enter your API Base URL (optional, press Enter to skip): ").strip()
+            llm_api_base = Prompt.ask("Please enter your API Base URL (optional, press Enter to skip)").strip()
             
         except EOFError:
-            print("\nConfiguration aborted. Exiting.")
+            console.print("\n[bold red]Configuration aborted. Exiting.[/bold red]")
             sys.exit(1)
             
         # Save to .lvcopilotenv in current directory
@@ -61,9 +67,9 @@ def configure_llm():
                     f.write(f"LLM_API_KEY={llm_api_key}\n")
                 if llm_api_base:
                     f.write(f"LLM_API_BASE={llm_api_base}\n")
-            print(f"LLM Configuration saved to {env_path}")
+            console.print(f"[green]LLM Configuration saved to {env_path}[/green]")
         except Exception as e:
-            print(f"Warning: Could not save LLM Configuration to {env_path}: {e}")
+            console.print(f"[bold yellow]Warning: Could not save LLM Configuration to {env_path}: {e}[/bold yellow]")
             
         # Update environ for the current run
         os.environ["LLM_MODEL"] = llm_model
@@ -85,7 +91,7 @@ def process_at_references(user_input):
                         content = f.read()
                     context += f"\n\n--- Content of {filepath} ---\n{content}\n"
                 except Exception as e:
-                    print(f"Warning: Could not read file {filepath}: {e}")
+                    console.print(f"[bold yellow]Warning: Could not read file {filepath}: {e}[/bold yellow]")
             elif os.path.isdir(filepath):
                 try:
                     files = os.listdir(filepath)
@@ -93,7 +99,7 @@ def process_at_references(user_input):
                     for file in files:
                         context += f"{file}\n"
                 except Exception as e:
-                    print(f"Warning: Could not list directory {filepath}: {e}")
+                    console.print(f"[bold yellow]Warning: Could not list directory {filepath}: {e}[/bold yellow]")
     
     if context:
         user_input += "\n\n[System Context injected based on user @ references]:" + context
@@ -112,7 +118,7 @@ def process_and_save_files(response, agent):
     if not matches:
         return
 
-    print("\n--- Code Generation Detected ---")
+    console.print("\n[bold cyan]--- Code Generation Detected ---[/bold cyan]")
     
     # ── Phase 1: Pre-scan — collect all file entries and resolve paths ──
     file_entries = []
@@ -157,40 +163,40 @@ def process_and_save_files(response, agent):
         lang = entry['lang']
         
         if filename:
-            print(f"\n[LVCopilot] Found code for: {filename}")
-            choice = input(f"Do you want to save this file? (y/n): ").strip().lower()
+            console.print(f"\n[bold blue][LVCopilot][/bold blue] Found code for: [cyan]{filename}[/cyan]")
+            choice = Confirm.ask("Do you want to save this file?")
         else:
-            print(f"\n[LVCopilot] Found a {lang if lang else 'code'} block without a clear file name.")
-            choice = input("Do you want to save this code block? (y/n): ").strip().lower()
+            console.print(f"\n[bold blue][LVCopilot][/bold blue] Found a [cyan]{lang if lang else 'code'}[/cyan] block without a clear file name.")
+            choice = Confirm.ask("Do you want to save this code block?")
         
-        if choice != 'y':
-            print(f"⏭️  Skipped.")
+        if not choice:
+            console.print("⏭️  [dim]Skipped.[/dim]")
             continue
         
         # Get the target path from user
         while True:
             if filename:
-                location = input(f"Enter the directory path to save '{filename}' to (e.g., ./src/actions/): ").strip()
+                location = Prompt.ask(f"Enter the directory path to save '{filename}' to (e.g., ./src/actions/)").strip()
                 if not location:
-                    print("Validation Error: Directory path cannot be empty.")
+                    console.print("[bold red]Validation Error:[/bold red] Directory path cannot be empty.")
                     continue
                 
                 expanded_location = os.path.expanduser(location)
                 final_path = os.path.join(expanded_location, filename)
             else:
-                filepath_input = input("Enter the full file path (including file name) to save to: ").strip()
+                filepath_input = Prompt.ask("Enter the full file path (including file name) to save to").strip()
                 
                 if not filepath_input:
-                    print("Validation Error: File path cannot be empty. Please provide the file name along with the file path.")
+                    console.print("[bold red]Validation Error:[/bold red] File path cannot be empty. Please provide the file name along with the file path.")
                     continue
                     
                 if filepath_input.endswith('/') or filepath_input.endswith('\\'):
-                    print("Validation Error: You provided a directory path. Please provide the file name along with the file path.")
+                    console.print("[bold red]Validation Error:[/bold red] You provided a directory path. Please provide the file name along with the file path.")
                     continue
                     
                 expanded_path = os.path.expanduser(filepath_input)
                 if os.path.isdir(expanded_path):
-                    print(f"Validation Error: '{filepath_input}' is an existing directory. Please provide the file name along with the file path.")
+                    console.print(f"[bold red]Validation Error:[/bold red] '{filepath_input}' is an existing directory. Please provide the file name along with the file path.")
                     continue
                     
                 final_path = expanded_path
@@ -214,34 +220,30 @@ def process_and_save_files(response, agent):
     existing_entries = [e for e in resolved_entries if e['exists']]
     new_entries = [e for e in resolved_entries if not e['exists']]
     
-    print("\n--- File Summary ---")
+    console.print("\n[bold cyan]--- File Summary ---[/bold cyan]")
     for entry in resolved_entries:
-        status = "[UPDATE]" if entry['exists'] else "[NEW]   "
-        print(f"  {status} {entry['filename']:<30} → {entry['abs_path']}")
-    print("")
+        status = "[yellow][UPDATE][/yellow]" if entry['exists'] else "[green][NEW]   [/green]"
+        console.print(f"  {status} {entry['filename']:<30} → {entry['abs_path']}")
+    console.print("")
     
     # ── Phase 4: Determine batch action for existing files ──
     batch_action = None  # None means new-only, 'm', 'o', 's', or 'p'
     
     if existing_entries:
-        print(f"⚠️  {len(existing_entries)} of {len(resolved_entries)} file(s) already exist.")
+        console.print(f"⚠️  [bold yellow]{len(existing_entries)} of {len(resolved_entries)} file(s) already exist.[/bold yellow]")
         
         if len(existing_entries) == 1:
             # Single existing file — go directly to per-file mode
             batch_action = 'p'
         else:
             # Multiple existing files — offer batch options
-            while True:
-                print("Choose action for existing files:")
-                print("  (m) Merge all   — smart LLM merge for all existing files")
-                print("  (o) Overwrite all — replace all existing files with new content")
-                print("  (s) Skip all    — skip all existing files, only save new ones")
-                print("  (p) Per-file    — decide individually for each file")
-                batch_choice = input("Your choice [m/o/s/p]: ").strip().lower()
-                if batch_choice in ('m', 'o', 's', 'p'):
-                    batch_action = batch_choice
-                    break
-                print("Invalid choice. Please enter m, o, s, or p.")
+            console.print("Choose action for existing files:")
+            console.print("  (m) Merge all   — smart LLM merge for all existing files")
+            console.print("  (o) Overwrite all — replace all existing files with new content")
+            console.print("  (s) Skip all    — skip all existing files, only save new ones")
+            console.print("  (p) Per-file    — decide individually for each file")
+            batch_choice = Prompt.ask("Your choice", choices=['m', 'o', 's', 'p'])
+            batch_action = batch_choice
     
     # ── Phase 5: Process each file ──
     merge_max_lines = file_merger.get_merge_max_lines()
@@ -263,15 +265,10 @@ def process_and_save_files(response, agent):
         
         if action == 'p':
             # Per-file prompt
-            while True:
-                file_choice = input(f"  {filename}: (m)erge, (o)verwrite, or (s)kip? [m/o/s]: ").strip().lower()
-                if file_choice in ('m', 'o', 's'):
-                    action = file_choice
-                    break
-                print("  Invalid choice. Please enter m, o, or s.")
+            action = Prompt.ask(f"  {filename}: (m)erge, (o)verwrite, or (s)kip?", choices=['m', 'o', 's'])
         
         if action == 's':
-            print(f"  ⏭️  Skipped: {filename}")
+            console.print(f"  ⏭️  [dim]Skipped: {filename}[/dim]")
             continue
         
         if action == 'o':
@@ -300,7 +297,7 @@ def _perform_merge(agent, entry, merge_max_lines):
     proposed_content = entry['code']
     
     if existing_content is None:
-        print(f"  ⚠️  Could not read existing file: {filename}. Falling back to overwrite.")
+        console.print(f"  ⚠️  [bold yellow]Could not read existing file: {filename}. Falling back to overwrite.[/bold yellow]")
         file_merger.create_backup(abs_path)
         _write_new_file(abs_path, proposed_content, filename)
         return
@@ -308,36 +305,36 @@ def _perform_merge(agent, entry, merge_max_lines):
     # Check file size against threshold
     line_count = len(existing_content.splitlines())
     if line_count > merge_max_lines:
-        print(f"  ⚠️  File has {line_count} lines (limit: {merge_max_lines}). LLM merge may consume significant tokens.")
-        proceed = input("  Proceed with merge? (y/n): ").strip().lower()
-        if proceed != 'y':
-            print(f"  ⏭️  Skipped merge for: {filename}")
+        console.print(f"  ⚠️  [bold yellow]File has {line_count} lines (limit: {merge_max_lines}). LLM merge may consume significant tokens.[/bold yellow]")
+        proceed = Confirm.ask("  Proceed with merge?")
+        if not proceed:
+            console.print(f"  ⏭️  [dim]Skipped merge for: {filename}[/dim]")
             return
     
     # Call LLM for merge
-    print(f"  🔄 Merging {filename}...")
+    console.print(f"  🔄 Merging {filename}...")
     try:
         merged_content = file_merger.merge_files(agent, existing_content, proposed_content, filename)
     except Exception as e:
-        print(f"  ❌ Merge failed: {e}")
-        fallback = input("  Do you want to (o)verwrite or (s)kip? [o/s]: ").strip().lower()
+        console.print(f"  ❌ [bold red]Merge failed: {e}[/bold red]")
+        fallback = Prompt.ask("  Do you want to (o)verwrite or (s)kip?", choices=['o', 's'])
         if fallback == 'o':
             file_merger.create_backup(abs_path)
             _write_new_file(abs_path, proposed_content, filename)
         else:
-            print(f"  ⏭️  Skipped: {filename}")
+            console.print(f"  ⏭️  [dim]Skipped: {filename}[/dim]")
         return
     
     # Show diff
     file_merger.show_diff(existing_content, merged_content, filename)
     
     # Confirm before writing
-    confirm = input(f"  Write merged content to {filename}? (y/n): ").strip().lower()
-    if confirm == 'y':
+    confirm = Confirm.ask(f"  Write merged content to {filename}?")
+    if confirm:
         file_merger.create_backup(abs_path)
         _write_new_file(abs_path, merged_content, filename)
     else:
-        print(f"  ⏭️  Merge discarded for: {filename}")
+        console.print(f"  ⏭️  [dim]Merge discarded for: {filename}[/dim]")
 
 
 def _write_new_file(abs_path, content, filename):
@@ -352,52 +349,51 @@ def _write_new_file(abs_path, content, filename):
         os.makedirs(os.path.dirname(abs_path) or '.', exist_ok=True)
         with open(abs_path, 'w', encoding='utf-8') as f:
             f.write(content)
-        print(f"  ✅ Saved to: {abs_path}")
+        console.print(f"  ✅ [green]Saved to: {abs_path}[/green]")
     except Exception as e:
-        print(f"  ❌ Error saving {filename}: {e}")
+        console.print(f"  ❌ [bold red]Error saving {filename}: {e}[/bold red]")
 
 
 def main():
-    print("=" * 60)
-    print("  Initializing Autonomous LV Developer Agent CLI...")
-    print("=" * 60 + "\n")
+    console.print(Panel.fit("[bold blue]Initializing Autonomous LV Developer Agent CLI...[/bold blue]"))
     
     configure_llm()
     
-    print("  Loading Knowledge Base and configuring LLM...")
+    console.print("[dim]Loading Knowledge Base and configuring LLM...[/dim]")
     try:
         agent = LVDeveloperAgent()
         initial_greeting = agent.start()
     except ValueError as ve:
-        print(f"Configuration Error: {ve}")
+        console.print(f"[bold red]Configuration Error:[/bold red] {ve}")
         sys.exit(1)
     except Exception as e:
-        print(f"Failed to start agent. Error: {e}")
+        console.print(f"[bold red]Failed to start agent. Error:[/bold red] {e}")
         sys.exit(1)
         
-    print(f"🤖 LV Agent:\n{initial_greeting}\n")
+    console.print(Panel(Markdown(initial_greeting), title="🤖 LV Agent", border_style="blue"))
     
     while True:
         try:
-            user_input = input("👤 Architect (type 'exit' to quit): ")
+            user_input = console.input("\n[bold cyan]👤 Architect (type 'exit' to quit): [/bold cyan]")
             if user_input.lower() in ['exit', 'quit']:
-                print("Goodbye!")
+                console.print("[bold green]Goodbye![/bold green]")
                 break
                 
             if not user_input.strip():
                 continue
                 
-            print("\n🤖 LV Agent is thinking...\n")
-            processed_input = process_at_references(user_input)
-            response = agent.send_message(processed_input)
-            print(f"🤖 LV Agent:\n{response}\n")
+            with console.status("[bold green]🤖 LV Agent is thinking...[/bold green]", spinner="dots"):
+                processed_input = process_at_references(user_input)
+                response = agent.send_message(processed_input)
+                
+            console.print(Panel(Markdown(response), title="🤖 LV Agent", border_style="blue"))
             process_and_save_files(response, agent)
             
         except KeyboardInterrupt:
-            print("\nExiting...")
+            console.print("\n[dim]Exiting...[/dim]")
             break
         except Exception as e:
-            print(f"\nError: {e}\n")
+            console.print(f"\n[bold red]Error:[/bold red] {e}\n")
 
 if __name__ == "__main__":
     main()

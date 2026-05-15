@@ -19,7 +19,8 @@ setup(
     packages=find_packages(),
     install_requires=[
         'litellm',
-        'python-dotenv'
+        'python-dotenv',
+        'rich'
     ],
     entry_points={
         'console_scripts': [
