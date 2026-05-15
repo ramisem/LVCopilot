@@ -41,6 +41,8 @@ jobs:
             --add-data "lvcopilot/skills:lvcopilot/skills" \
             --collect-data litellm \
             --copy-metadata litellm \
+            --hidden-import tiktoken_ext.openai_public \
+            --hidden-import tiktoken_ext.anthropic \
             run.py
 
       - name: Build executable with PyInstaller (Windows)
@@ -51,6 +53,8 @@ jobs:
             --add-data "lvcopilot/skills;lvcopilot/skills" `
             --collect-data litellm `
             --copy-metadata litellm `
+            --hidden-import tiktoken_ext.openai_public `
+            --hidden-import tiktoken_ext.anthropic `
             run.py
 
       - name: Upload Artifact
