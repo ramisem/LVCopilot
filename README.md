@@ -30,6 +30,19 @@ LVCopilot is an autonomous LabVantage (LV) Senior Developer agent powered by Goo
 
 ## Setup & Installation
 
+### Using the Standalone Executable (Recommended)
+
+1. **Download the Executable:**
+   Obtain the provided `LVCopilot` executable file shared with you.
+
+2. **Run the Application:**
+   Simply run the executable file to launch the LVCopilot agent. There is no need to install Python or any dependencies.
+
+3. **Configure your API Key:**
+   On your first run, if an API key is missing, the application will prompt you securely in the terminal and automatically generate the required configuration for you.
+
+### Installing from Source (For Developers)
+
 1. **Navigate to the project directory:**
 
    ```bash
