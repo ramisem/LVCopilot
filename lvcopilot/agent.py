@@ -45,6 +45,7 @@ class LVDeveloperAgent:
         self.model_name = os.environ.get("LLM_MODEL", "gemini/gemini-2.5-flash")
         self.api_key = os.environ.get("LLM_API_KEY")
         self.api_base = os.environ.get("LLM_API_BASE")
+        self.thinking = os.environ.get("LLM_THINKING", "").lower() == "true"
         
         self.messages = []
         
@@ -109,6 +110,13 @@ class LVDeveloperAgent:
             kwargs["api_key"] = self.api_key
         if self.api_base:
             kwargs["api_base"] = self.api_base
+        if self.thinking:
+            kwargs["extra_body"] = {
+                "chat_template_kwargs": {
+                    "thinking": True,
+                    "reasoning_effort": "high"
+                }
+            }
             
         try:
             response = litellm.completion(**kwargs)
@@ -141,6 +149,13 @@ class LVDeveloperAgent:
             kwargs["api_key"] = self.api_key
         if self.api_base:
             kwargs["api_base"] = self.api_base
+        if self.thinking:
+            kwargs["extra_body"] = {
+                "chat_template_kwargs": {
+                    "thinking": True,
+                    "reasoning_effort": "high"
+                }
+            }
         
         response = litellm.completion(**kwargs)
         return response.choices[0].message.content

@@ -99,6 +99,7 @@ def configure_llm():
         console.print("  - Gemini: [cyan]gemini/gemini-2.5-flash, gemini/gemini-pro[/cyan]")
         console.print("  - Anthropic: [cyan]anthropic/claude-3-opus-20240229[/cyan]")
         console.print("  - Ollama: [cyan]ollama/llama3[/cyan]")
+        console.print("  - NVIDIA (OpenAI-compat): [cyan]openai/deepseek-ai/deepseek-v4-flash[/cyan] + API base [cyan]https://integrate.api.nvidia.com/v1[/cyan]")
         try:
             llm_model = Prompt.ask("Please enter the LLM Model you want to use", default="gemini/gemini-2.5-flash").strip()
             if not llm_model:
@@ -113,6 +114,11 @@ def configure_llm():
                     
             llm_api_base = Prompt.ask("Please enter your API Base URL (optional, press Enter to skip)").strip()
             
+            enable_thinking = Confirm.ask(
+                "Enable reasoning/thinking mode? (Only supported by NVIDIA DeepSeek — say No for all other models)",
+                default=False
+            )
+            
         except EOFError:
             console.print("\n[bold red]Configuration aborted. Exiting.[/bold red]")
             sys.exit(1)
@@ -125,6 +131,8 @@ def configure_llm():
                     f.write(f"LLM_API_KEY={llm_api_key}\n")
                 if llm_api_base:
                     f.write(f"LLM_API_BASE={llm_api_base}\n")
+                if enable_thinking:
+                    f.write("LLM_THINKING=true\n")
             console.print(f"[green]LLM Configuration saved to {env_path}[/green]")
         except Exception as e:
             console.print(f"[bold yellow]Warning: Could not save LLM Configuration to {env_path}: {e}[/bold yellow]")
@@ -135,6 +143,8 @@ def configure_llm():
             os.environ["LLM_API_KEY"] = llm_api_key
         if llm_api_base:
             os.environ["LLM_API_BASE"] = llm_api_base
+        if enable_thinking:
+            os.environ["LLM_THINKING"] = "true"
 
 def process_at_references(user_input):
     # Match @ followed by non-space characters
