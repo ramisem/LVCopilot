@@ -15,8 +15,13 @@ from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
 from .agent import LVDeveloperAgent
 from . import file_merger
+from . import code_investigator
 
 console = Console()
+
+# Track investigated file paths from Modify mode Phase 1.5
+# Maps basename -> absolute path so Phase 4 can auto-resolve without re-asking
+_investigated_files = {}
 
 
 def _find_at_token(text):
@@ -179,6 +184,216 @@ def process_at_references(user_input):
         
     return user_input
 
+
+def detect_agent_mode(response):
+    """Detect if agent is in Modify mode based on response markers.
+    
+    Returns:
+        str: 'modify' or 'new'
+    """
+    if re.search(r'\[Mode:\s*Modify\]', response, re.IGNORECASE):
+        return 'modify'
+    return 'new'
+
+
+def detect_investigation_phase(response):
+    """Check if the agent is in Phase 1.5 (investigation setup).
+    
+    Returns:
+        bool: True if [Phase: 1.5] is found in the response.
+    """
+    return bool(re.search(r'\[Phase:\s*1\.5\]', response, re.IGNORECASE))
+
+
+def handle_investigation_phase(session):
+    """Prompt the architect for investigation starting points (supports multiple files).
+    
+    Asks for one or more file paths and optionally a method/code hint per file,
+    then builds a combined investigation context using code_investigator.
+    
+    Args:
+        session: The PromptSession for input.
+    
+    Returns:
+        str: The user's text combined with investigation context for all files,
+             ready to send to the agent.
+    """
+    console.print("\n[bold cyan]📂 Investigation Mode[/bold cyan]")
+    console.print("[dim]The agent needs to understand the existing code before proposing changes.[/dim]")
+    console.print("[dim]Provide the file path(s) to investigate (you can use @path for autocomplete).[/dim]\n")
+    
+    from prompt_toolkit.formatted_text import HTML as _HTML
+    
+    all_contexts = []
+    file_descriptions = []
+    file_count = 0
+    
+    while True:
+        label = "Primary" if file_count == 0 else "Additional"
+        file_input = session.prompt(_HTML(f"\n<ansicyan><b>📄 {label} file path to investigate: </b></ansicyan>"))
+        file_input = file_input.strip()
+        
+        if not file_input:
+            if file_count == 0:
+                console.print("[bold yellow]No file provided. The agent will continue without investigation context.[/bold yellow]")
+                return ""
+            else:
+                # No more files — done
+                break
+        
+        # Extract the file path — handle @prefix if used
+        file_path = file_input.lstrip('@').strip()
+        
+        # Get optional method/code hint
+        method_hint = session.prompt(_HTML("\n<ansicyan><b>🔍 Starting method/code (optional, press Enter to skip): </b></ansicyan>"))
+        method_hint = method_hint.strip() if method_hint else None
+        
+        # Build the investigation context for this file
+        abs_path = os.path.abspath(os.path.expanduser(file_path))
+        if not os.path.isfile(abs_path):
+            console.print(f"[bold yellow]Warning: File '{file_path}' not found. Skipping.[/bold yellow]")
+        else:
+            console.print(f"  📖 [dim]Reading: {abs_path}[/dim]")
+            context = code_investigator.build_investigation_context(file_path, method_hint)
+            all_contexts.append(context)
+            
+            # Remember this file path so Phase 4 can auto-resolve it
+            basename = os.path.basename(abs_path)
+            _investigated_files[basename] = abs_path
+            
+            desc = f"{file_path}"
+            if method_hint:
+                desc += f" (method: {method_hint})"
+            file_descriptions.append(desc)
+            file_count += 1
+            console.print(f"  ✅ [green]File {file_count} loaded[/green]")
+        
+        # Ask if there are more files
+        add_more = Confirm.ask("\nDo you have another file to investigate?", default=False)
+        if not add_more:
+            break
+    
+    if not all_contexts:
+        return ""
+    
+    # Build the combined user message
+    user_text = "Here are the files to investigate:\n"
+    for desc in file_descriptions:
+        user_text += f"  - {desc}\n"
+    user_text += "\n" + "\n\n".join(all_contexts)
+    
+    total_chars = sum(len(c) for c in all_contexts)
+    console.print(f"\n  📋 [green]Investigation context prepared: {file_count} file(s), {total_chars} chars total[/green]")
+    
+    return user_text
+
+
+MAX_AUTO_INVESTIGATION_ROUNDS = 5
+
+
+def _parse_investigate_markers(response):
+    """Extract [Investigate: filename.ext] markers from an agent response.
+    
+    Args:
+        response: The agent's response text.
+    
+    Returns:
+        list[str]: List of filenames requested for investigation.
+    """
+    return re.findall(r'\[Investigate:\s*([^\]]+)\]', response, re.IGNORECASE)
+
+
+def _run_auto_investigation(agent, last_response):
+    """Auto-investigation loop: detect file requests and auto-feed them.
+    
+    Scans the agent's response for [Investigate: filename.ext] markers,
+    searches the project for those files, reads them, and sends them
+    back to the agent. Repeats until no more files are requested or
+    the round limit is reached.
+    
+    Args:
+        agent: The LVDeveloperAgent instance.
+        last_response: The agent's most recent response text.
+    """
+    # Build search roots from investigated file directories + CWD
+    search_roots = set()
+    search_roots.add(os.getcwd())
+    for abs_path in _investigated_files.values():
+        parent = os.path.dirname(abs_path)
+        search_roots.add(parent)
+        # Also add the grandparent (project root is often one level up from src/)
+        grandparent = os.path.dirname(parent)
+        if grandparent:
+            search_roots.add(grandparent)
+    
+    for round_num in range(1, MAX_AUTO_INVESTIGATION_ROUNDS + 1):
+        requested_files = _parse_investigate_markers(last_response)
+        
+        if not requested_files:
+            # No more files requested — investigation is done
+            return
+        
+        # Deduplicate and filter out already-investigated files
+        unique_requests = []
+        seen = set()
+        for fname in requested_files:
+            fname = fname.strip()
+            if fname not in seen and fname not in _investigated_files:
+                unique_requests.append(fname)
+                seen.add(fname)
+        
+        if not unique_requests:
+            return
+        
+        console.print(f"\n[bold cyan]🔎 Auto-Investigation Round {round_num}[/bold cyan]")
+        console.print(f"[dim]The agent needs {len(unique_requests)} more file(s):[/dim]")
+        for fname in unique_requests:
+            console.print(f"  [dim]• {fname}[/dim]")
+        
+        # Locate and read each requested file
+        found_contexts = []
+        not_found = []
+        
+        for fname in unique_requests:
+            found_path = code_investigator.find_file_in_project(fname, list(search_roots))
+            if found_path:
+                console.print(f"  ✅ [green]Found: {found_path}[/green]")
+                context = code_investigator.build_investigation_context(found_path)
+                found_contexts.append(context)
+                # Track for Phase 4 auto-resolution
+                _investigated_files[fname] = found_path
+                # Add this file's directory to search roots for future rounds
+                search_roots.add(os.path.dirname(found_path))
+            else:
+                console.print(f"  ⚠️  [yellow]Not found: {fname}[/yellow]")
+                not_found.append(fname)
+        
+        if not found_contexts:
+            # None of the requested files were found
+            not_found_msg = "The following files could not be located in the project:\n"
+            for fname in not_found:
+                not_found_msg += f"  - {fname}\n"
+            not_found_msg += "Please continue your investigation with the files already provided, or ask the Architect for help locating these files."
+            with console.status("[bold green]🤖 LV Agent continuing investigation...[/bold green]", spinner="dots"):
+                last_response = agent.send_message(not_found_msg)
+            console.print(Panel(Markdown(last_response), title=f"🤖 LV Agent — Investigation (Round {round_num})", border_style="yellow"))
+            continue
+        
+        # Build the auto-investigation message
+        auto_msg = f"[System: Auto-Investigation Round {round_num}]\n"
+        auto_msg += f"Found {len(found_contexts)} of {len(unique_requests)} requested file(s).\n"
+        if not_found:
+            auto_msg += f"Could NOT find: {', '.join(not_found)}\n"
+        auto_msg += "\n" + "\n\n".join(found_contexts)
+        
+        with console.status("[bold green]🤖 LV Agent continuing investigation...[/bold green]", spinner="dots"):
+            last_response = agent.send_message(auto_msg)
+        console.print(Panel(Markdown(last_response), title=f"🤖 LV Agent — Investigation (Round {round_num})", border_style="yellow"))
+    
+    if _parse_investigate_markers(last_response):
+        console.print(f"[bold yellow]⚠️  Investigation round limit ({MAX_AUTO_INVESTIGATION_ROUNDS}) reached. The agent may continue with partial context.[/bold yellow]")
+
+
 def process_and_save_files(response, agent):
     # Only prompt for file saving if we are in Phase 4
     if not re.search(r'\[Phase:\s*4\]', response, re.IGNORECASE):
@@ -234,6 +449,25 @@ def process_and_save_files(response, agent):
     for entry in file_entries:
         filename = entry['filename']
         lang = entry['lang']
+        
+        # Check if this file was previously investigated (Modify mode)
+        # If so, auto-resolve the path without asking
+        if filename and filename in _investigated_files:
+            abs_path = _investigated_files[filename]
+            console.print(f"\n[bold blue][LVCopilot][/bold blue] Modified file: [cyan]{filename}[/cyan] → {abs_path}")
+            choice = Confirm.ask("Do you want to save the modified file?")
+            
+            if not choice:
+                console.print("⏭️  [dim]Skipped.[/dim]")
+                continue
+            
+            exists, existing_content = file_merger.detect_existing_file(abs_path)
+            entry['filename'] = filename
+            entry['abs_path'] = abs_path
+            entry['exists'] = exists
+            entry['existing_content'] = existing_content
+            resolved_entries.append(entry)
+            continue
         
         if filename:
             console.print(f"\n[bold blue][LVCopilot][/bold blue] Found code for: [cyan]{filename}[/cyan]")
@@ -505,6 +739,7 @@ def main():
                 _tab_state['cursor_after'] = buf.cursor_position
 
     session = PromptSession(key_bindings=kb)
+    current_mode = 'new'  # Track the current operational mode
     
     while True:
         try:
@@ -518,9 +753,48 @@ def main():
                 
             with console.status("[bold green]🤖 LV Agent is thinking...[/bold green]", spinner="dots"):
                 processed_input = process_at_references(user_input)
+                
+                # In Modify mode, track any @referenced files so Phase 4
+                # can auto-resolve their paths without re-asking
+                if current_mode == 'modify':
+                    at_paths = set(re.findall(r'@([^\s]+)', user_input))
+                    for at_path in at_paths:
+                        expanded = os.path.expanduser(at_path)
+                        if os.path.isfile(expanded):
+                            abs_ref = os.path.abspath(expanded)
+                            _investigated_files[os.path.basename(abs_ref)] = abs_ref
+                
                 response = agent.send_message(processed_input)
                 
             console.print(Panel(Markdown(response), title="🤖 LV Agent", border_style="blue"))
+            
+            # Detect and track the operational mode
+            detected_mode = detect_agent_mode(response)
+            if detected_mode == 'modify':
+                current_mode = 'modify'
+                console.print("[dim]📋 Mode: Modify — The agent will investigate existing code before proposing changes.[/dim]")
+            elif re.search(r'\[Phase:\s*1\]', response) and not re.search(r'\[Phase:\s*1\.5\]', response):
+                # Reset mode when agent returns to Phase 1 (new cycle)
+                current_mode = 'new'
+                _investigated_files.clear()
+            
+            # Handle Phase 1.5 — Investigation Setup (Modify mode)
+            if detect_investigation_phase(response):
+                investigation_input = handle_investigation_phase(session)
+                if investigation_input:
+                    with console.status("[bold green]🤖 LV Agent is investigating...[/bold green]", spinner="dots"):
+                        investigation_response = agent.send_message(investigation_input)
+                    console.print(Panel(Markdown(investigation_response), title="🤖 LV Agent — Investigation", border_style="yellow"))
+                    
+                    # Auto-investigation loop: detect [Investigate: filename] requests
+                    # and auto-feed files back to the agent
+                    _run_auto_investigation(agent, investigation_response)
+                    
+                continue
+            
+            # Handle Phase 4 — File saving (both modes)
+            # In Modify mode, the file merger will detect existing files
+            # and offer merge/overwrite/skip options automatically
             process_and_save_files(response, agent)
             
         except KeyboardInterrupt:
