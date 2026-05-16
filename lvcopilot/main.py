@@ -394,7 +394,7 @@ def _run_auto_investigation(agent, last_response):
         console.print(f"[bold yellow]⚠️  Investigation round limit ({MAX_AUTO_INVESTIGATION_ROUNDS}) reached. The agent may continue with partial context.[/bold yellow]")
 
 
-def process_and_save_files(response, agent):
+def process_and_save_files(response, agent, session):
     # Only prompt for file saving if we are in Phase 4
     if not re.search(r'\[Phase:\s*4\]', response, re.IGNORECASE):
         return
@@ -482,8 +482,12 @@ def process_and_save_files(response, agent):
         
         # Get the target path from user
         while True:
+            from prompt_toolkit.formatted_text import HTML as _HTML
             if filename:
-                location = Prompt.ask(f"Enter the directory path to save '{filename}' to (e.g., ./src/actions/)").strip()
+                location = session.prompt(_HTML(f"<ansicyan><b>Enter the directory path to save '{filename}' to (e.g., ./src/actions/): </b></ansicyan>")).strip()
+                if location:
+                    location = location.lstrip('@').strip()
+                
                 if not location:
                     console.print("[bold red]Validation Error:[/bold red] Directory path cannot be empty.")
                     continue
@@ -491,7 +495,9 @@ def process_and_save_files(response, agent):
                 expanded_location = os.path.expanduser(location)
                 final_path = os.path.join(expanded_location, filename)
             else:
-                filepath_input = Prompt.ask("Enter the full file path (including file name) to save to").strip()
+                filepath_input = session.prompt(_HTML("<ansicyan><b>Enter the full file path (including file name) to save to: </b></ansicyan>")).strip()
+                if filepath_input:
+                    filepath_input = filepath_input.lstrip('@').strip()
                 
                 if not filepath_input:
                     console.print("[bold red]Validation Error:[/bold red] File path cannot be empty. Please provide the file name along with the file path.")
@@ -795,7 +801,7 @@ def main():
             # Handle Phase 4 — File saving (both modes)
             # In Modify mode, the file merger will detect existing files
             # and offer merge/overwrite/skip options automatically
-            process_and_save_files(response, agent)
+            process_and_save_files(response, agent, session)
             
         except KeyboardInterrupt:
             console.print("\n[dim]Exiting...[/dim]")
