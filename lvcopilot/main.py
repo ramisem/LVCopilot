@@ -105,6 +105,7 @@ def configure_llm():
         console.print("  - Anthropic: [cyan]anthropic/claude-3-opus-20240229[/cyan]")
         console.print("  - Ollama: [cyan]ollama/llama3[/cyan]")
         console.print("  - NVIDIA (OpenAI-compat): [cyan]openai/deepseek-ai/deepseek-v4-flash[/cyan] + API base [cyan]https://integrate.api.nvidia.com/v1[/cyan]")
+        console.print("  - OpenCode Zen: [cyan]openai/minimax-m2.5-free[/cyan] + API base [cyan]https://opencode.ai/zen/v1[/cyan]")
         try:
             llm_model = Prompt.ask("Please enter the LLM Model you want to use", default="gemini/gemini-2.5-flash").strip()
             if not llm_model:

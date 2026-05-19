@@ -165,7 +165,11 @@ class LVDeveloperAgent:
 
     def start(self):
         knowledge_context = self.load_knowledge_base()
-        full_system_prompt = SYSTEM_PROMPT + "\n\n" + knowledge_context
+        
+        # Inject the model name into the system prompt so the agent knows what it is
+        identity_injection = f"\n\n[System Info]\nYou are running on the following LLM model: {self.model_name}\nIf asked about your model, state this clearly."
+        
+        full_system_prompt = SYSTEM_PROMPT + identity_injection + "\n\n" + knowledge_context
         
         self.messages = [
             {"role": "system", "content": full_system_prompt}
