@@ -376,8 +376,9 @@ def _run_auto_investigation(agent, last_response):
                 not_found_msg += f"  - {fname}\n"
             not_found_msg += "Please continue your investigation with the files already provided, or ask the Architect for help locating these files."
             with console.status("[bold green]🤖 LV Agent continuing investigation...[/bold green]", spinner="dots"):
-                last_response = agent.send_message(not_found_msg)
+                last_response, stats = agent.send_message(not_found_msg)
             console.print(Panel(Markdown(last_response), title=f"🤖 LV Agent — Investigation (Round {round_num})", border_style="yellow"))
+            _display_token_stats(agent, stats)
             continue
         
         # Build the auto-investigation message
@@ -388,8 +389,9 @@ def _run_auto_investigation(agent, last_response):
         auto_msg += "\n" + "\n\n".join(found_contexts)
         
         with console.status("[bold green]🤖 LV Agent continuing investigation...[/bold green]", spinner="dots"):
-            last_response = agent.send_message(auto_msg)
+            last_response, stats = agent.send_message(auto_msg)
         console.print(Panel(Markdown(last_response), title=f"🤖 LV Agent — Investigation (Round {round_num})", border_style="yellow"))
+        _display_token_stats(agent, stats)
     
     if _parse_investigate_markers(last_response):
         console.print(f"[bold yellow]⚠️  Investigation round limit ({MAX_AUTO_INVESTIGATION_ROUNDS}) reached. The agent may continue with partial context.[/bold yellow]")
@@ -668,6 +670,45 @@ def _write_new_file(abs_path, content, filename):
         console.print(f"  ❌ [bold red]Error saving {filename}: {e}[/bold red]")
 
 
+def _display_token_stats(agent, turn_stats):
+    """Display token usage stats after an agent response.
+    
+    Args:
+        agent: The LVDeveloperAgent instance.
+        turn_stats: Token stats dict from send_message(), or None.
+    """
+    if not turn_stats:
+        return
+    prompt_k = turn_stats['prompt_tokens'] / 1000
+    comp_k = turn_stats['completion_tokens'] / 1000
+    total_session = (agent.session_stats['total_prompt']
+                     + agent.session_stats['total_completion'])
+    total_k = total_session / 1000
+    turns = agent.session_stats['turns']
+    console.print(
+        f"[dim]  📊 Turn: ↑{prompt_k:.1f}K ↓{comp_k:.1f}K tokens | "
+        f"Session: {total_k:.1f}K total ({turns} turns)[/dim]"
+    )
+
+
+def _display_session_summary(agent):
+    """Display a final session summary on exit.
+    
+    Args:
+        agent: The LVDeveloperAgent instance.
+    """
+    total = (agent.session_stats['total_prompt']
+             + agent.session_stats['total_completion'])
+    if total > 0:
+        turns = agent.session_stats['turns']
+        console.print(
+            f"\n[bold cyan]📊 Session Summary[/bold cyan]: "
+            f"{total/1000:.1f}K tokens across {turns} turns "
+            f"(↑{agent.session_stats['total_prompt']/1000:.1f}K prompt, "
+            f"↓{agent.session_stats['total_completion']/1000:.1f}K completion)"
+        )
+
+
 def main():
     console.print(Panel.fit("[bold blue]Initializing Autonomous LV Developer Agent CLI...[/bold blue]"))
     
@@ -676,7 +717,7 @@ def main():
     console.print("[dim]Loading Knowledge Base and configuring LLM...[/dim]")
     try:
         agent = LVDeveloperAgent()
-        initial_greeting = agent.start()
+        initial_greeting, initial_stats = agent.start()
     except ValueError as ve:
         console.print(f"[bold red]Configuration Error:[/bold red] {ve}")
         sys.exit(1)
@@ -685,6 +726,7 @@ def main():
         sys.exit(1)
         
     console.print(Panel(Markdown(initial_greeting), title="🤖 LV Agent", border_style="blue"))
+    _display_token_stats(agent, initial_stats)
     
     # Shell-style Tab completion for @paths — inline cycling (no dropdown, no printing)
     # State for cycling through multiple matches
@@ -752,6 +794,7 @@ def main():
         try:
             user_input = session.prompt(HTML("\n<ansicyan><b>👤 Architect (type 'exit' to quit): </b></ansicyan>"))
             if user_input.lower() in ['exit', 'quit']:
+                _display_session_summary(agent)
                 console.print("[bold green]Goodbye![/bold green]")
                 break
                 
@@ -771,9 +814,10 @@ def main():
                             abs_ref = os.path.abspath(expanded)
                             _investigated_files[os.path.basename(abs_ref)] = abs_ref
                 
-                response = agent.send_message(processed_input)
+                response, turn_stats = agent.send_message(processed_input)
                 
             console.print(Panel(Markdown(response), title="🤖 LV Agent", border_style="blue"))
+            _display_token_stats(agent, turn_stats)
             
             # Detect and track the operational mode
             detected_mode = detect_agent_mode(response)
@@ -790,8 +834,9 @@ def main():
                 investigation_input = handle_investigation_phase(session)
                 if investigation_input:
                     with console.status("[bold green]🤖 LV Agent is investigating...[/bold green]", spinner="dots"):
-                        investigation_response = agent.send_message(investigation_input)
+                        investigation_response, inv_stats = agent.send_message(investigation_input)
                     console.print(Panel(Markdown(investigation_response), title="🤖 LV Agent — Investigation", border_style="yellow"))
+                    _display_token_stats(agent, inv_stats)
                     
                     # Auto-investigation loop: detect [Investigate: filename] requests
                     # and auto-feed files back to the agent
@@ -805,6 +850,7 @@ def main():
             process_and_save_files(response, agent, session)
             
         except KeyboardInterrupt:
+            _display_session_summary(agent)
             console.print("\n[dim]Exiting...[/dim]")
             break
         except Exception as e:

@@ -169,15 +169,82 @@ def detect_language(filepath):
     return mapping.get(ext, 'unknown')
 
 
-def build_investigation_context(file_path, method_hint=None):
+def build_structural_summary(content, language):
+    """Extract a file's structural skeleton — imports, class declarations,
+    and method signatures (without bodies).
+
+    Gives the agent the "big picture" of a file without the full content,
+    helping it understand the overall structure and available methods.
+
+    Args:
+        content: Raw file content string.
+        language: Language identifier (e.g., 'java', 'python').
+
+    Returns:
+        str: A compact structural summary of the file.
+    """
+    lines = content.splitlines()
+    summary_lines = []
+
+    if language == 'java':
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith('*') or stripped.startswith('/*'):
+                continue
+            # Keep: package, import, class/interface declarations, method signatures
+            if (stripped.startswith('package ')
+                    or stripped.startswith('import ')
+                    or re.match(
+                        r'(public|protected|private|static|abstract|final)\s+'
+                        r'.*(class|interface|enum)\s', stripped)
+                    or re.match(
+                        r'\s*(public|protected|private|static)\s+.*\(.*\)', stripped)):
+                summary_lines.append(line)
+    elif language == 'python':
+        for line in lines:
+            stripped = line.strip()
+            if (stripped.startswith('import ')
+                    or stripped.startswith('from ')
+                    or stripped.startswith('class ')
+                    or stripped.startswith('def ')):
+                summary_lines.append(line)
+    else:
+        # Generic: keep lines that look like declarations
+        for line in lines:
+            stripped = line.strip()
+            if (stripped.startswith('import ')
+                    or stripped.startswith('from ')
+                    or 'class ' in stripped
+                    or 'function ' in stripped
+                    or stripped.startswith('def ')
+                    or stripped.startswith('export ')):
+                summary_lines.append(line)
+
+    if not summary_lines:
+        return "--- File Structure ---\n(Could not extract structural summary)\n"
+
+    return "--- File Structure (imports, classes, method signatures) ---\n" + \
+           "\n".join(summary_lines) + "\n--- End Structure ---"
+
+
+def build_investigation_context(file_path, method_hint=None, full=False):
     """Build a rich context string for the agent from a file and optional method hint.
 
     This is the main entry point used by main.py to construct the investigation
     context that gets injected into the agent's conversation.
 
+    When a method hint is provided and successfully matched, sends only the
+    structural summary (imports + class + method signatures) plus the extracted
+    method — NOT the full file. This typically reduces context by 70-90%.
+
+    The agent can request the full file via ``[Investigate: filename]`` if the
+    focused extraction is insufficient.
+
     Args:
         file_path: Path to the entry-point file.
         method_hint: Optional method name or code snippet to focus on.
+        full: If True, always include the full file content regardless of
+              whether a method hint was matched.
 
     Returns:
         str: Formatted context string ready to inject into the conversation,
@@ -191,16 +258,17 @@ def build_investigation_context(file_path, method_hint=None):
 
     language = detect_language(abs_path)
     filename = os.path.basename(abs_path)
+    total_lines = len(raw_content.splitlines())
 
     context_parts = [
         f"\n[System Context — Investigation Entry Point]",
         f"File: {abs_path}",
         f"Language: {language}",
-        f"Total lines: {len(raw_content.splitlines())}",
+        f"Total lines: {total_lines}",
     ]
 
     # If a method hint is provided, try to extract the specific method
-    if method_hint:
+    if method_hint and not full:
         method_hint = method_hint.strip()
         context_parts.append(f"Method/Code hint: {method_hint}")
 
@@ -211,16 +279,25 @@ def build_investigation_context(file_path, method_hint=None):
             extracted = extract_method_generic(raw_content, method_hint)
 
         if extracted:
-            context_parts.append(f"\n--- Focused Extraction (around '{method_hint}') ---")
+            # Smart pruning: structural summary + focused extraction only
+            structural = build_structural_summary(raw_content, language)
+            context_parts.append(f"\n{structural}")
+            context_parts.append(f"\n--- Focused Extraction: {method_hint} ---")
             context_parts.append(extracted)
             context_parts.append("--- End Focused Extraction ---")
+            context_parts.append(
+                f"\n[Note: Showing focused extraction ({len(extracted.splitlines())} lines) "
+                f"from a {total_lines}-line file. Full file content available via "
+                f"[Investigate: {filename}] if you need more context.]"
+            )
+            return "\n".join(context_parts)
         else:
             context_parts.append(
                 f"[Note: Could not locate '{method_hint}' in the file. "
                 f"Providing full file content instead.]"
             )
 
-    # Always include the full file content for complete context
+    # Full file content — either no hint, hint didn't match, or full=True
     context_parts.append(f"\n--- Full Content of {filename} ---")
     context_parts.append(numbered_content)
     context_parts.append(f"--- End of {filename} ---")

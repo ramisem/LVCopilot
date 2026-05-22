@@ -53,15 +53,22 @@ You have two versions of this file:
 === END PROPOSED CHANGES ===
 
 MERGE RULES:
-- The proposed changes represent new or modified functionality to integrate into the existing file.
-- Preserve ALL existing code that is NOT being replaced by the proposed changes.
-- If a method/function in the proposed code has the same signature as one in the existing code, REPLACE the existing method body with the proposed version.
-- If the proposed code adds NEW methods, imports, fields, or constants, ADD them to the appropriate location in the existing file.
-- Maintain the existing package declaration, class declaration, and overall file structure.
-- Preserve all existing comments and documentation that are not part of replaced methods.
-- Do NOT remove any existing methods, fields, or imports that are not present in the proposed changes — they are still needed.
-- Maintain the original code style (indentation, spacing, comment style).
-- If both versions have import statements, merge them — include all unique imports from both versions.
+1. **Understand the Proposed Changes**: The proposed changes might represent a complete file or just a partial snippet of modifications to integrate into the existing production file.
+2. **Preserve Existing Unchanged Code**: Preserve ALL existing methods, classes, variables, imports, annotations, and comments that are not explicitly and intentionally modified to implement the new feature. Do NOT remove or modify any stable, existing code on disk unless it is a functional change.
+3. **Handle Placeholders/Omissions in Proposed Changes**:
+   - If a method, class, or section in the proposed changes is represented by a placeholder or has a comment indicating existing code (e.g., `// ... existing code ...`, `// existing logic`, `/* rest of code */`, `// todo: rest of class`), you MUST PRESERVE the entire, original existing body of that method/class/section. Do NOT replace it with the placeholder or a truncated version.
+   - If a method present in the existing file is missing or omitted entirely in the proposed changes, preserve the existing method in full.
+4. **Intelligent Method Body Replacement**:
+   - If a method/function in the proposed changes has the same signature as one in the existing code, compare their bodies carefully.
+   - Replace the existing method body ONLY if the proposed version contains a fully implemented, functional, and intentional change to that method's logic.
+   - If the proposed method body is simplified, lazy, missing error handling, missing logging, missing variables, or appears to be a degradation/hallucination compared to the existing code on disk, DO NOT replace it. Keep the existing robust implementation.
+5. **Incorporate New Elements**:
+   - If the proposed changes add NEW methods, variables, imports, fields, annotations, or constants, insert them into the appropriate locations of the existing file.
+   - For imports: merge the imports from both files, keeping all unique imports.
+6. **Structure and Style**:
+   - Maintain the original package declaration, class declarations, annotations, and overall file structure.
+   - Retain all original code style, indentation, spacing, comments, and formatting.
+7. **Strict Safety Principle**: If in doubt, or if a proposed change to an existing method seems incomplete or potentially degrading, PRESERVE the existing method from the disk file in its entirety. Under no circumstances should stable, existing logic on disk be deleted, truncated, or broken.
 
 OUTPUT RULES:
 - Output ONLY the final merged file content.

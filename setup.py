@@ -4,7 +4,7 @@ import os
 def get_data_files():
     data_files = []
     # Package md_files and skills directories into lvcopilot_data in sys.prefix
-    for d in ['lvcopilot/md_files', 'lvcopilot/skills']:
+    for d in ['lvcopilot/md_files', 'lvcopilot/skills', 'lvcopilot/architecture']:
         if os.path.exists(d):
             files = [os.path.join(d, f) for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))]
             if files:
