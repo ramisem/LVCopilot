@@ -125,6 +125,20 @@ def configure_llm():
                 default=False
             )
             
+            # Ask for optional LV_SUMMARY_INTERVAL
+            while True:
+                lv_summary_interval = Prompt.ask(
+                    "Please enter the summarization interval (number of user turns between summaries, optional, press Enter to skip)"
+                ).strip()
+                if not lv_summary_interval:
+                    lv_summary_interval = None
+                    break
+                try:
+                    int(lv_summary_interval)
+                    break
+                except ValueError:
+                    console.print("[bold red]Validation Error:[/bold red] Please enter a valid integer or press Enter to skip.")
+            
         except EOFError:
             console.print("\n[bold red]Configuration aborted. Exiting.[/bold red]")
             sys.exit(1)
@@ -139,6 +153,8 @@ def configure_llm():
                     f.write(f"LLM_API_BASE={llm_api_base}\n")
                 if enable_thinking:
                     f.write("LLM_THINKING=true\n")
+                if lv_summary_interval:
+                    f.write(f"LV_SUMMARY_INTERVAL={lv_summary_interval}\n")
             console.print(f"[green]LLM Configuration saved to {env_path}[/green]")
         except Exception as e:
             console.print(f"[bold yellow]Warning: Could not save LLM Configuration to {env_path}: {e}[/bold yellow]")
@@ -151,6 +167,8 @@ def configure_llm():
             os.environ["LLM_API_BASE"] = llm_api_base
         if enable_thinking:
             os.environ["LLM_THINKING"] = "true"
+        if lv_summary_interval:
+            os.environ["LV_SUMMARY_INTERVAL"] = lv_summary_interval
 
 def process_at_references(user_input):
     # Match @ followed by non-space characters
@@ -797,6 +815,18 @@ def main():
                 _display_session_summary(agent)
                 console.print("[bold green]Goodbye![/bold green]")
                 break
+                
+            if user_input.strip().lower() in ['clear', '/clear']:
+                console.clear()
+                console.print("\n[bold green]🔄 Session cleared successfully! Starting a fresh session...[/bold green]\n")
+                _investigated_files.clear()
+                current_mode = 'new'
+                agent.reset()
+                
+                initial_greeting, initial_stats = agent.start()
+                console.print(Panel(Markdown(initial_greeting), title="🤖 LV Agent", border_style="blue"))
+                _display_token_stats(agent, initial_stats)
+                continue
                 
             if not user_input.strip():
                 continue

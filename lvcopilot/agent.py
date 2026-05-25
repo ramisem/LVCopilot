@@ -341,6 +341,19 @@ class LVDeveloperAgent:
 
         return combined
 
+    def reset(self):
+        """Reset the conversation history and agent state to start a fresh session."""
+        self.conversation = ConversationManager()
+        self.loaded_skills = set()
+        self.loaded_full_refs = {}
+        self.session_stats = {
+            'total_prompt': 0,
+            'total_completion': 0,
+            'turns': 0,
+        }
+        self.hallucination_detected = False
+        self._current_component = None
+
     def start(self):
         """Initialize the agent and return the first greeting.
 
