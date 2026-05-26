@@ -10,6 +10,7 @@ from . import knowledge_index
 from .code_validator import (
     LVCodeValidator, format_validation_feedback, extract_code_blocks,
 )
+from .preference_manager import PreferenceManager
 
 # load_dotenv() is handled in main.py per project directory
 SYSTEM_PROMPT = """\
@@ -198,6 +199,9 @@ class LVDeveloperAgent:
         self._current_component = None  # Tracks which component is being developed
         self.hallucination_detected = False
 
+        # Architect preference learning
+        self.preference_manager = PreferenceManager()
+
     def _is_in_phase_3(self):
         """Check if the conversation is currently in Phase 3.
 
@@ -342,7 +346,11 @@ class LVDeveloperAgent:
         return combined
 
     def reset(self):
-        """Reset the conversation history and agent state to start a fresh session."""
+        """Reset the conversation history and agent state to start a fresh session.
+
+        Note: The preference_manager is NOT reset — architect preferences
+        persist across sessions.
+        """
         self.conversation = ConversationManager()
         self.loaded_skills = set()
         self.loaded_full_refs = {}
@@ -365,7 +373,44 @@ class LVDeveloperAgent:
             f"If asked about your model, state this clearly."
         )
 
-        full_system_prompt = SYSTEM_PROMPT + identity_injection
+        # Inject learned architect preferences into the system prompt
+        preferences_block = self.preference_manager.format_for_prompt()
+
+        # For Ollama models, native tool calling is unstable and forces JSON/hallucinated tool calls.
+        # We append clear text-based tool instructions so the agent can use JSON block fallbacks.
+        ollama_tools_instruction = ""
+        if self.model_name.startswith("ollama/"):
+            ollama_tools_instruction = """
+
+────────────────────────────────────────
+TOOL CALLING INSTRUCTION FOR OLLAMA
+────────────────────────────────────────
+You can invoke tools by outputting a JSON block anywhere in your response. The system will detect the JSON and execute the tool.
+To call a tool, output exactly a JSON object in this format (no other text around the JSON block is required, but you can include normal explanation before or after):
+{
+  "name": "tool_name",
+  "arguments": {
+    "arg1": "value1"
+  }
+}
+
+Available tools:
+1. `fetch_architecture_guide` - No arguments.
+   Example: {"name": "fetch_architecture_guide", "arguments": {}}
+   
+2. `fetch_lv_rules` - Fetch skill rules for a LabVantage component.
+   Arguments:
+     - `component` (string, one of: "action", "ajax", "javascript", "sdc_rule", "sdms")
+   Example: {"name": "fetch_lv_rules", "arguments": {"component": "action"}}
+   
+3. `fetch_lv_reference` - Fetch specific sections from full API reference.
+   Arguments:
+     - `component` (string, one of: "action", "ajax", "javascript", "sdc_rule", "sdms", "java_public_api")
+     - `topic` (string, the specific topic, e.g. "QueryProcessor", "SafeSQL", "ActionBlock", "DBAccess", "error handling")
+   Example: {"name": "fetch_lv_reference", "arguments": {"component": "java_public_api", "topic": "SafeSQL"}}
+"""
+
+        full_system_prompt = SYSTEM_PROMPT + preferences_block + identity_injection + ollama_tools_instruction
 
         self.conversation.set_system_prompt(full_system_prompt)
 
@@ -388,6 +433,13 @@ class LVDeveloperAgent:
                 turn_stats contains 'prompt_tokens', 'completion_tokens',
                 'total_tokens' when available.
         """
+        # Check for architect rejection/modification and trigger preference extraction
+        # This runs BEFORE adding the message to history so we can capture
+        # the last assistant message (the proposal being rejected)
+        self.preference_manager.check_and_trigger(
+            message, self.conversation.messages
+        )
+
         self.conversation.add_message("user", message)
 
         is_hallucination_acc = False
@@ -423,9 +475,11 @@ class LVDeveloperAgent:
                 kwargs = {
                     "model": self.model_name,
                     "messages": self.conversation.get_messages(),
-                    "tools": TOOLS,
-                    "tool_choice": "auto"
                 }
+
+                if not self.model_name.startswith("ollama/"):
+                    kwargs["tools"] = TOOLS
+                    kwargs["tool_choice"] = "auto"
 
                 if self.api_key:
                     kwargs["api_key"] = self.api_key

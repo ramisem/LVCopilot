@@ -139,6 +139,41 @@ def configure_llm():
                 except ValueError:
                     console.print("[bold red]Validation Error:[/bold red] Please enter a valid integer or press Enter to skip.")
             
+            # Ask for optional Preference Learning LLM config
+            console.print("\n[bold cyan]Preference Learning Configuration (optional)[/bold cyan]")
+            console.print("[dim]The agent can learn your design/coding preferences from your feedback.[/dim]")
+            console.print("[dim]You can use a separate (cheaper/faster) model for preference extraction.[/dim]")
+            
+            lv_pref_model = Prompt.ask(
+                "Preference extraction model (optional, press Enter to use the main model)"
+            ).strip() or None
+            
+            lv_pref_api_key = None
+            lv_pref_api_base = None
+            if lv_pref_model:
+                lv_pref_api_key = Prompt.ask(
+                    "Preference model API Key (press Enter to use the main API key)",
+                    password=True
+                ).strip() or None
+                lv_pref_api_base = Prompt.ask(
+                    "Preference model API Base URL (press Enter to use the main API base)"
+                ).strip() or None
+            
+            # Ask for optional LV_MAX_PREFERENCES
+            lv_max_preferences = None
+            while True:
+                lv_max_prefs_input = Prompt.ask(
+                    "Max preferences to store (default: 30, press Enter to skip)"
+                ).strip()
+                if not lv_max_prefs_input:
+                    break
+                try:
+                    int(lv_max_prefs_input)
+                    lv_max_preferences = lv_max_prefs_input
+                    break
+                except ValueError:
+                    console.print("[bold red]Validation Error:[/bold red] Please enter a valid integer or press Enter to skip.")
+            
         except EOFError:
             console.print("\n[bold red]Configuration aborted. Exiting.[/bold red]")
             sys.exit(1)
@@ -155,6 +190,14 @@ def configure_llm():
                     f.write("LLM_THINKING=true\n")
                 if lv_summary_interval:
                     f.write(f"LV_SUMMARY_INTERVAL={lv_summary_interval}\n")
+                if lv_pref_model:
+                    f.write(f"LV_PREF_MODEL={lv_pref_model}\n")
+                if lv_pref_api_key:
+                    f.write(f"LV_PREF_API_KEY={lv_pref_api_key}\n")
+                if lv_pref_api_base:
+                    f.write(f"LV_PREF_API_BASE={lv_pref_api_base}\n")
+                if lv_max_preferences:
+                    f.write(f"LV_MAX_PREFERENCES={lv_max_preferences}\n")
             console.print(f"[green]LLM Configuration saved to {env_path}[/green]")
         except Exception as e:
             console.print(f"[bold yellow]Warning: Could not save LLM Configuration to {env_path}: {e}[/bold yellow]")
@@ -169,6 +212,14 @@ def configure_llm():
             os.environ["LLM_THINKING"] = "true"
         if lv_summary_interval:
             os.environ["LV_SUMMARY_INTERVAL"] = lv_summary_interval
+        if lv_pref_model:
+            os.environ["LV_PREF_MODEL"] = lv_pref_model
+        if lv_pref_api_key:
+            os.environ["LV_PREF_API_KEY"] = lv_pref_api_key
+        if lv_pref_api_base:
+            os.environ["LV_PREF_API_BASE"] = lv_pref_api_base
+        if lv_max_preferences:
+            os.environ["LV_MAX_PREFERENCES"] = lv_max_preferences
 
 def process_at_references(user_input):
     # Match @ followed by non-space characters
@@ -727,6 +778,86 @@ def _display_session_summary(agent):
         )
 
 
+def _handle_preferences_command(agent, user_input):
+    """Handle the /preferences command for managing learned preferences.
+
+    Subcommands:
+        /preferences         — List all stored preferences
+        /preferences delete N — Delete preference at index N
+        /preferences clear   — Clear all preferences
+
+    Args:
+        agent: The LVDeveloperAgent instance.
+        user_input: The full user input string.
+    """
+    parts = user_input.split()
+    pref_mgr = agent.preference_manager
+
+    if len(parts) == 1:
+        # /preferences — list all
+        prefs = pref_mgr.list_preferences()
+        if not prefs:
+            console.print("\n[dim]No architect preferences stored yet. Preferences are learned automatically from your feedback during Phase 2 and Phase 3.[/dim]\n")
+            return
+
+        console.print(f"\n[bold cyan]🧠 Architect Preferences ({len(prefs)}/{pref_mgr.max_preferences})[/bold cyan]\n")
+        for i, pref in enumerate(prefs, 1):
+            category = pref.get("category", "general").upper().replace("_", " ")
+            rule = pref.get("rule", "")
+            phase = pref.get("source_phase", "?")
+            created = pref.get("created_at", "")[:10]
+            console.print(f"  [bold]{i}.[/bold] [{category}] {rule}")
+            console.print(f"     [dim]Phase {phase} • {created}[/dim]")
+        console.print(f"\n[dim]Use '/preferences delete N' to remove or '/preferences clear' to clear all.[/dim]\n")
+        return
+
+    subcommand = parts[1].lower()
+
+    if subcommand == "delete" and len(parts) >= 3:
+        try:
+            index = int(parts[2])
+            removed = pref_mgr.remove_preference(index)
+            if removed:
+                console.print(f"\n[green]✅ Removed preference {index}: {removed.get('rule', '')}[/green]\n")
+            else:
+                console.print(f"\n[bold red]Invalid index: {index}[/bold red]\n")
+        except ValueError:
+            console.print("\n[bold red]Usage: /preferences delete <number>[/bold red]\n")
+        return
+
+    if subcommand == "clear":
+        count = len(pref_mgr.list_preferences())
+        if count == 0:
+            console.print("\n[dim]No preferences to clear.[/dim]\n")
+            return
+        confirm = Confirm.ask(f"Clear all {count} preferences?")
+        if confirm:
+            pref_mgr.clear_all()
+            console.print("\n[green]✅ All preferences cleared.[/green]\n")
+        else:
+            console.print("\n[dim]Cancelled.[/dim]\n")
+        return
+
+    console.print("\n[bold yellow]Usage:[/bold yellow]")
+    console.print("  /preferences          — List all stored preferences")
+    console.print("  /preferences delete N — Delete preference at index N")
+    console.print("  /preferences clear    — Clear all preferences\n")
+
+
+def _display_preference_notifications(agent):
+    """Display any pending background preference extraction notifications.
+
+    Called after each agent response to show the architect what preferences
+    were learned from their feedback.
+
+    Args:
+        agent: The LVDeveloperAgent instance.
+    """
+    notifications = agent.preference_manager.get_pending_notifications()
+    for notification in notifications:
+        console.print(f"[bold magenta]{notification}[/bold magenta]")
+
+
 def main():
     console.print(Panel.fit("[bold blue]Initializing Autonomous LV Developer Agent CLI...[/bold blue]"))
     
@@ -745,6 +876,11 @@ def main():
         
     console.print(Panel(Markdown(initial_greeting), title="🤖 LV Agent", border_style="blue"))
     _display_token_stats(agent, initial_stats)
+    
+    # Show loaded architect preferences count
+    pref_count = len(agent.preference_manager.list_preferences())
+    if pref_count > 0:
+        console.print(f"[dim]🧠 {pref_count} architect preference(s) loaded from previous sessions[/dim]")
     
     # Shell-style Tab completion for @paths — inline cycling (no dropdown, no printing)
     # State for cycling through multiple matches
@@ -818,7 +954,11 @@ def main():
                 
             if user_input.strip().lower() in ['clear', '/clear']:
                 console.clear()
-                console.print("\n[bold green]🔄 Session cleared successfully! Starting a fresh session...[/bold green]\n")
+                console.print("\n[bold green]🔄 Session cleared successfully! Starting a fresh session...[/bold green]")
+                pref_count = len(agent.preference_manager.list_preferences())
+                if pref_count > 0:
+                    console.print(f"[dim]💡 {pref_count} architect preference(s) retained (use /preferences to manage)[/dim]")
+                console.print()
                 _investigated_files.clear()
                 current_mode = 'new'
                 agent.reset()
@@ -826,6 +966,10 @@ def main():
                 initial_greeting, initial_stats = agent.start()
                 console.print(Panel(Markdown(initial_greeting), title="🤖 LV Agent", border_style="blue"))
                 _display_token_stats(agent, initial_stats)
+                continue
+            
+            if user_input.strip().lower().startswith('/preferences'):
+                _handle_preferences_command(agent, user_input.strip())
                 continue
                 
             if not user_input.strip():
@@ -848,6 +992,9 @@ def main():
                 
             console.print(Panel(Markdown(response), title="🤖 LV Agent", border_style="blue"))
             _display_token_stats(agent, turn_stats)
+            
+            # Display any background preference extraction notifications
+            _display_preference_notifications(agent)
             
             # Detect and track the operational mode
             detected_mode = detect_agent_mode(response)
