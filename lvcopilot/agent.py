@@ -11,6 +11,7 @@ from .code_validator import (
     LVCodeValidator, format_validation_feedback, extract_code_blocks,
 )
 from .preference_manager import PreferenceManager
+from .db_connector import DatabaseManager
 
 # load_dotenv() is handled in main.py per project directory
 SYSTEM_PROMPT = """\
@@ -90,6 +91,17 @@ PHASE 4: FILE GENERATION
 [New] Output final code blocks. Prefix each with: `File: filename.ext`.
 [Modify] Output COMPLETE modified file content (full file, not just changes). Prefix each with: `File: filename.ext`.
 → WAIT for save confirmation, then return to Phase 1.
+
+────────────────────────────────────────
+DATABASE ACCESS
+────────────────────────────────────────
+You have read-only access to configured databases (Oracle / SQL Server) to aid in scoping, schema investigation, and query validation.
+Always use database connectivity tools when you need to inspect tables, write queries, or understand the data model.
+- `list_db_tables`: List tables/views in the database (optionally under a specific schema).
+- `describe_db_table`: Fetch column details, data types, nullability, and lengths for a table.
+- `query_database`: Run a read-only SELECT statement. This query is automatically row-limited (default 50 rows).
+All operations are read-only. DML (INSERT, UPDATE, DELETE, MERGE) and DDL (CREATE, ALTER, DROP, TRUNCATE) are strictly blocked.
+Use the `db` parameter to target "db1" (Primary, default) or "db2" (Secondary, if configured).
 """
 
 TOOLS = [
@@ -143,6 +155,71 @@ TOOLS = [
                 "required": ["component", "topic"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_database",
+            "description": "Execute a read-only SELECT query against the configured database. Returns results formatted as a table. Enforces read-only SELECT validation and row limits.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The read-only SELECT query to execute."
+                    },
+                    "db": {
+                        "type": "string",
+                        "enum": ["db1", "db2"],
+                        "description": "The target database identifier (optional, defaults to 'db1')."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_db_tables",
+            "description": "List all tables or views in the configured database, optionally filtered by schema.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "schema": {
+                        "type": "string",
+                        "description": "The schema name to list tables from (optional)."
+                    },
+                    "db": {
+                        "type": "string",
+                        "enum": ["db1", "db2"],
+                        "description": "The target database identifier (optional, defaults to 'db1')."
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "describe_db_table",
+            "description": "Describe the schema (columns, types, lengths, nullability) of a specific database table.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table_name": {
+                        "type": "string",
+                        "description": "The name of the database table to describe."
+                    },
+                    "db": {
+                        "type": "string",
+                        "enum": ["db1", "db2"],
+                        "description": "The target database identifier (optional, defaults to 'db1')."
+                    }
+                },
+                "required": ["table_name"]
+            }
+        }
     }
 ]
 
@@ -165,7 +242,7 @@ def parse_text_tool_call(text):
                         data = json.loads(substring)
                         if isinstance(data, dict) and "name" in data:
                             tool_name = data.get("name")
-                            if tool_name in ("fetch_architecture_guide", "fetch_lv_rules", "fetch_lv_reference", "fetch_lv_syntax"):
+                            if tool_name in ("fetch_architecture_guide", "fetch_lv_rules", "fetch_lv_reference", "fetch_lv_syntax", "query_database", "list_db_tables", "describe_db_table"):
                                 return data, substring
                     except Exception:
                         pass
@@ -201,6 +278,9 @@ class LVDeveloperAgent:
 
         # Architect preference learning
         self.preference_manager = PreferenceManager()
+
+        # Database manager
+        self.db_manager = DatabaseManager()
 
     def _is_in_phase_3(self):
         """Check if the conversation is currently in Phase 3.
@@ -361,6 +441,8 @@ class LVDeveloperAgent:
         }
         self.hallucination_detected = False
         self._current_component = None
+        self.db_manager.close_all()
+        self.db_manager = DatabaseManager()
 
     def start(self):
         """Initialize the agent and return the first greeting.
@@ -408,6 +490,24 @@ Available tools:
      - `component` (string, one of: "action", "ajax", "javascript", "sdc_rule", "sdms", "java_public_api")
      - `topic` (string, the specific topic, e.g. "QueryProcessor", "SafeSQL", "ActionBlock", "DBAccess", "error handling")
    Example: {"name": "fetch_lv_reference", "arguments": {"component": "java_public_api", "topic": "SafeSQL"}}
+
+4. `query_database` - Run a read-only SELECT query against the configured database.
+   Arguments:
+     - `query` (string, the SQL SELECT query to run)
+     - `db` (string, optional, "db1" or "db2", defaults to "db1")
+   Example: {"name": "query_database", "arguments": {"query": "SELECT * FROM my_table", "db": "db1"}}
+
+5. `list_db_tables` - List all tables or views in the configured database, optionally filtered by schema.
+   Arguments:
+     - `schema` (string, optional, schema name to list tables from)
+     - `db` (string, optional, "db1" or "db2", defaults to "db1")
+   Example: {"name": "list_db_tables", "arguments": {"schema": "dbo", "db": "db1"}}
+
+6. `describe_db_table` - Describe the schema of a specific database table.
+   Arguments:
+     - `table_name` (string, name of the database table to describe)
+     - `db` (string, optional, "db1" or "db2", defaults to "db1")
+   Example: {"name": "describe_db_table", "arguments": {"table_name": "my_table", "db": "db1"}}
 """
 
         full_system_prompt = SYSTEM_PROMPT + preferences_block + identity_injection + ollama_tools_instruction
@@ -620,6 +720,30 @@ Available tools:
         if function_name == "fetch_lv_syntax":
             component = args.get("component", "")
             return self._load_skill_rules(component)
+
+        if function_name == "query_database":
+            query = args.get("query", "")
+            db = args.get("db", "db1")
+            try:
+                return self.db_manager.get_connector(db).execute_query(query)
+            except Exception as e:
+                return f"Error: {e}"
+
+        if function_name == "list_db_tables":
+            schema = args.get("schema")
+            db = args.get("db", "db1")
+            try:
+                return self.db_manager.get_connector(db).list_tables(schema)
+            except Exception as e:
+                return f"Error: {e}"
+
+        if function_name == "describe_db_table":
+            table_name = args.get("table_name", "")
+            db = args.get("db", "db1")
+            try:
+                return self.db_manager.get_connector(db).describe_table(table_name)
+            except Exception as e:
+                return f"Error: {e}"
 
         return f"Error: Unknown tool '{function_name}'."
 

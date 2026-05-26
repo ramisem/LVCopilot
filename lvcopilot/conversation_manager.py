@@ -322,6 +322,25 @@ class ConversationManager:
                 "design patterns (Fail-Fast, Silent Calculation, Safe Access, Atomic Action).]"
             )
 
+        # Handle query_database
+        if tool_name == "query_database":
+            # Extract row count from the result or use a default
+            row_match = re.search(r'\((\d+)\s+row', content, re.IGNORECASE)
+            row_count = row_match.group(1) if row_match else "unknown"
+            return f"[Database Query: executed successfully, {row_count} row(s) returned]"
+
+        # Handle list_db_tables
+        if tool_name == "list_db_tables":
+            table_match = re.search(r'Found (\d+)\s+table', content, re.IGNORECASE)
+            table_count = table_match.group(1) if table_match else "unknown"
+            return f"[Database Tables: found {table_count} table(s)]"
+
+        # Handle describe_db_table
+        if tool_name == "describe_db_table":
+            col_match = re.search(r'(\d+)\s+column', content, re.IGNORECASE)
+            col_count = col_match.group(1) if col_match else "unknown"
+            return f"[Table Description: {col_count} column(s) described]"
+
         # For "already loaded" messages, keep as-is
         if content and "already present" in content.lower():
             return None

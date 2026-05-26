@@ -2,3 +2,5 @@ litellm
 python-dotenv==1.0.1
 rich
 prompt_toolkit
+oracledb
+pyodbc

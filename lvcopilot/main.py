@@ -16,6 +16,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from .agent import LVDeveloperAgent
 from . import file_merger
 from . import code_investigator
+from .db_connector import DatabaseConnector
 
 console = Console()
 
@@ -220,6 +221,42 @@ def configure_llm():
             os.environ["LV_PREF_API_BASE"] = lv_pref_api_base
         if lv_max_preferences:
             os.environ["LV_MAX_PREFERENCES"] = lv_max_preferences
+
+    # ── Database Configuration (optional) ──
+    # Only prompt if no DB is already configured
+    db1_type = os.environ.get("DB1_TYPE", "").strip()
+    if not db1_type:
+        console.print("\n[bold cyan]Database Configuration (optional)[/bold cyan]")
+        console.print("[dim]Configure database access so the agent can query tables during development.[/dim]")
+        configure_db = Confirm.ask("Do you want to configure database access?", default=False)
+        
+        if configure_db:
+            _configure_database(env_path, "DB1", "Primary")
+            
+            add_second = Confirm.ask("\nDo you want to configure a second database?", default=False)
+            if add_second:
+                _configure_database(env_path, "DB2", "Secondary")
+            
+            # Shared settings
+            db_max_rows = Prompt.ask(
+                "Max rows per query result (default: 50)"
+            ).strip()
+            if db_max_rows:
+                try:
+                    int(db_max_rows)
+                    os.environ["DB_MAX_ROWS"] = db_max_rows
+                    try:
+                        with open(env_path, 'a') as f:
+                            f.write(f"DB_MAX_ROWS={db_max_rows}\n")
+                    except Exception:
+                        pass
+                except ValueError:
+                    console.print("[bold yellow]Invalid number — using default (50).[/bold yellow]")
+    else:
+        console.print(f"[dim]Database DB1 configured: {db1_type}[/dim]")
+        db2_type = os.environ.get("DB2_TYPE", "").strip()
+        if db2_type:
+            console.print(f"[dim]Database DB2 configured: {db2_type}[/dim]")
 
 def process_at_references(user_input):
     # Match @ followed by non-space characters
@@ -858,6 +895,121 @@ def _display_preference_notifications(agent):
         console.print(f"[bold magenta]{notification}[/bold magenta]")
 
 
+def _configure_database(env_path, prefix, label):
+    """Prompt the user for database configuration and save to .lvcopilotenv.
+
+    Args:
+        env_path: Path to the .lvcopilotenv file.
+        prefix: Environment variable prefix (e.g., 'DB1', 'DB2').
+        label: Human-readable label (e.g., 'Primary', 'Secondary').
+    """
+    console.print(f"\n[bold cyan]📦 {label} Database ({prefix})[/bold cyan]")
+
+    db_type = Prompt.ask(
+        f"  Database type",
+        choices=["oracle", "sqlserver"]
+    ).strip().lower()
+
+    db_host = Prompt.ask(f"  Host").strip()
+
+    default_port = "1521" if db_type == "oracle" else "1433"
+    db_port = Prompt.ask(f"  Port", default=default_port).strip()
+
+    name_label = "Service name/SID" if db_type == "oracle" else "Database name"
+    db_name = Prompt.ask(f"  {name_label}").strip()
+
+    db_user = Prompt.ask(f"  Username").strip()
+    db_password = Prompt.ask(f"  Password", password=True).strip()
+
+    # Set environment variables for the current run
+    os.environ[f"{prefix}_TYPE"] = db_type
+    os.environ[f"{prefix}_HOST"] = db_host
+    os.environ[f"{prefix}_PORT"] = db_port
+    os.environ[f"{prefix}_NAME"] = db_name
+    os.environ[f"{prefix}_USER"] = db_user
+    os.environ[f"{prefix}_PASSWORD"] = db_password
+
+    # Save to .lvcopilotenv
+    try:
+        with open(env_path, 'a') as f:
+            f.write(f"\n{prefix}_TYPE={db_type}\n")
+            f.write(f"{prefix}_HOST={db_host}\n")
+            f.write(f"{prefix}_PORT={db_port}\n")
+            f.write(f"{prefix}_NAME={db_name}\n")
+            f.write(f"{prefix}_USER={db_user}\n")
+            f.write(f"{prefix}_PASSWORD={db_password}\n")
+        console.print(f"  [green]✅ {label} database configuration saved.[/green]")
+    except Exception as e:
+        console.print(f"  [bold yellow]Warning: Could not save to {env_path}: {e}[/bold yellow]")
+
+    # Test connection
+    console.print(f"  🔄 Testing connection...")
+    connector = DatabaseConnector(prefix)
+    result = connector.test_connection()
+    console.print(f"  {result}")
+
+
+def _handle_db_command(agent, user_input):
+    """Handle the /db command for database management.
+
+    Subcommands:
+        /db status     — Show connection status for all configured databases
+        /db test       — Test all configured database connections
+        /db disconnect — Close all active database connections
+        /db config     — Reconfigure database settings
+
+    Args:
+        agent: The LVDeveloperAgent instance.
+        user_input: The full user input string.
+    """
+    parts = user_input.split()
+    db_mgr = agent.db_manager
+
+    if len(parts) == 1:
+        # /db — show help
+        console.print("\n[bold cyan]🗄️  Database Commands[/bold cyan]")
+        console.print("  /db status     — Show connection status")
+        console.print("  /db test       — Test database connections")
+        console.print("  /db disconnect — Close all connections")
+        console.print("  /db config     — Reconfigure database settings\n")
+        return
+
+    subcommand = parts[1].lower()
+
+    if subcommand == "status":
+        status = db_mgr.get_status()
+        console.print(f"\n{status}\n")
+        return
+
+    if subcommand == "test":
+        console.print("\n[bold cyan]🔄 Testing database connections...[/bold cyan]")
+        results = db_mgr.test_connections()
+        console.print(f"\n{results}\n")
+        return
+
+    if subcommand == "disconnect":
+        result = db_mgr.close_all()
+        console.print(f"\n{result}\n")
+        return
+
+    if subcommand == "config":
+        env_path = os.path.join(os.getcwd(), '.lvcopilotenv')
+        console.print("\n[bold cyan]📦 Database Reconfiguration[/bold cyan]")
+        _configure_database(env_path, "DB1", "Primary")
+        add_second = Confirm.ask("\nConfigure a second database?", default=False)
+        if add_second:
+            _configure_database(env_path, "DB2", "Secondary")
+        # Reinitialize the db_manager with new env vars
+        agent.db_manager.close_all()
+        from .db_connector import DatabaseManager
+        agent.db_manager = DatabaseManager()
+        console.print("\n[green]✅ Database configuration updated.[/green]\n")
+        return
+
+    console.print(f"\n[bold yellow]Unknown /db subcommand: {subcommand}[/bold yellow]")
+    console.print("  Use: /db status | /db test | /db disconnect | /db config\n")
+
+
 def main():
     console.print(Panel.fit("[bold blue]Initializing Autonomous LV Developer Agent CLI...[/bold blue]"))
     
@@ -882,6 +1034,9 @@ def main():
     if pref_count > 0:
         console.print(f"[dim]🧠 {pref_count} architect preference(s) loaded from previous sessions[/dim]")
     
+    # Show database status
+    if agent.db_manager.has_any_configured():
+        console.print(f"[dim]🗄️  Database access available (use /db status to check)[/dim]")    
     # Shell-style Tab completion for @paths — inline cycling (no dropdown, no printing)
     # State for cycling through multiple matches
     _tab_state = {'cycling': False, 'matches': [], 'index': 0,
@@ -970,6 +1125,10 @@ def main():
             
             if user_input.strip().lower().startswith('/preferences'):
                 _handle_preferences_command(agent, user_input.strip())
+                continue
+            
+            if user_input.strip().lower().startswith('/db'):
+                _handle_db_command(agent, user_input.strip())
                 continue
                 
             if not user_input.strip():

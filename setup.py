@@ -21,7 +21,9 @@ setup(
         'litellm',
         'python-dotenv',
         'rich',
-        'prompt_toolkit'
+        'prompt_toolkit',
+        'oracledb',
+        'pyodbc',
     ],
     entry_points={
         'console_scripts': [

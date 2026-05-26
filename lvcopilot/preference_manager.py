@@ -30,16 +30,16 @@ import litellm
 
 _EXTRACTION_PROMPT = """\
 You are analyzing a conversation between a Software Architect and an AI Developer Agent. \
-The Architect has just rejected or requested modifications to the Agent's proposal.
+The Architect has just rejected, requested modifications, or is sharing critical solution details/constraints for the Agent's proposal.
 
-Your task: Decide how to handle this feedback as a learned preference for the Architect's \
-design and coding style. You must think smartly — only store preferences that will \
-meaningfully guide the Agent in future conversations.
+Your task: Decide how to handle this input as a learned preference for the Architect's \
+design/coding style, architectural constraints, specific technical decisions, domain-specific requirements, or critical solution details. \
+You must think smartly — only store preferences/guidelines that will meaningfully guide the Agent in future conversations.
 
-AGENT'S PROPOSAL (what was rejected/modified):
+AGENT'S PROPOSAL (what was rejected/modified/commented on):
 {agent_proposal}
 
-ARCHITECT'S FEEDBACK (the rejection/modification request):
+ARCHITECT'S FEEDBACK/SOLUTION DETAILS (the input from the architect):
 {architect_feedback}
 
 EXISTING PREFERENCES (already learned from this Architect):
@@ -48,14 +48,14 @@ EXISTING PREFERENCES (already learned from this Architect):
 INSTRUCTIONS:
 1. First, review ALL existing preferences carefully.
 2. Decide one of three actions:
-   a) **SKIP** — if the feedback does not express a reusable preference, OR if an existing \
-preference already fully covers this feedback. Do not store redundant or trivial preferences.
+   a) **SKIP** — if the feedback/details do not express a reusable preference/constraint/critical instruction, OR if an existing \
+preference already fully covers this. Do not store redundant or trivial details.
    b) **MERGE** — if the feedback refines, extends, or is closely related to an existing \
-preference. Merge them into a single, stronger combined rule that captures both.
-   c) **NEW** — if the feedback expresses a genuinely new preference not covered by any existing one.
+preference. Merge them into a single, stronger combined rule/guideline that captures both.
+   c) **NEW** — if the feedback expresses a genuinely new preference, technical constraint, domain logic rule, or architectural guideline not covered by any existing one.
 3. Be smart about storage: prefer MERGE over NEW when possible to keep the preference list \
 compact and powerful. Only use NEW for truly distinct preferences.
-4. Classify into: design, coding_style, api_usage, naming, architecture, error_handling, performance
+4. Classify into: design, coding_style, api_usage, naming, architecture, error_handling, performance, domain_logic, database_constraints
 
 OUTPUT FORMAT (JSON only, no markdown fences):
 
@@ -63,16 +63,16 @@ For SKIP:
 {{"action": "SKIP", "reasoning": "<why this was skipped>"}}
 
 For NEW:
-{{"action": "NEW", "category": "<category>", "rule": "<concise rule statement>", "reasoning": "<why this is a new preference>"}}
+{{"action": "NEW", "category": "<category>", "rule": "<concise rule statement>", "reasoning": "<why this is a new preference/constraint>"}}
 
 For MERGE:
-{{"action": "MERGE", "merge_with_id": "<id of existing preference to merge with>", "category": "<category>", "merged_rule": "<new combined rule that covers both the existing and new preference>", "reasoning": "<why these were merged>"}}
+{{"action": "MERGE", "merge_with_id": "<id of existing preference to merge with>", "category": "<category>", "merged_rule": "<new combined rule/guideline that covers both the existing and new preference>", "reasoning": "<why these were merged>"}}
 
 Rules:
-- Rules must be clear, actionable directives (e.g., "Always use X instead of Y when Z")
+- Rules must be clear, actionable directives (e.g., "Always use X instead of Y when Z", or "For table X, join with Y on Z")
 - Max 60 words for any rule
-- Do NOT include project-specific details (file names, variable names) — keep it general
-- Think like the Architect: what rule would ensure the Agent never makes this kind of mistake again?
+- Do NOT include fleeting conversation details, but DO include critical architectural decisions, schemas, API usage, or domain-specific constraints if they represent a persistent design choice/rule.
+- Think like the Architect: what rule/constraint would ensure the Agent always aligns with this solution in future turns/sessions?
 """
 
 _CONSOLIDATION_PROMPT = """\
@@ -103,7 +103,7 @@ OUTPUT FORMAT (JSON only, no markdown fences):
 
 # ── Rejection detection ───────────────────────────────────────────────────
 
-# Phase 2 rejection patterns (plan/design feedback)
+# Phase 2 rejection and solution sharing patterns (plan/design feedback/guidance)
 _PHASE2_REJECTION_PATTERNS = [
     r"\bno\b[,.]?\s+(?:use|try|do|go|instead|rather|change)",
     r"\bwrong\s+(?:approach|way|pattern|design|hook|flow)",
@@ -122,9 +122,40 @@ _PHASE2_REJECTION_PATTERNS = [
     r"\bno\s*,?\s+(?:that'?s|this\s+is)\s+(?:not|wrong|incorrect)",
     r"\breject",
     r"\bnot\s+(?:correct|right|good|ideal|the\s+right)",
+    # Constructive solution sharing & instruction patterns:
+    r"\bneed to\b",
+    r"\bwe should\b",
+    r"\bmust\b",
+    r"\bmake sure\b",
+    r"\bplease\b",
+    r"\bthe logic\b",
+    r"\bthe approach\b",
+    r"\bimplement\b",
+    r"\bcreate\b",
+    r"\bdefine\b",
+    r"\bhandle\b",
+    r"\badd\b",
+    r"\bquery\b",
+    r"\btable\b",
+    r"\bselect\b",
+    r"\bjoin\b",
+    r"\bwhere\b",
+    r"\bfrom\b",
+    r"\bhere is\b",
+    r"\buse\b",
+    r"\busing\b",
+    r"\bthe requirement\b",
+    r"\bdomain\b",
+    r"\bconstraint\b",
+    r"\brule\b",
+    r"\barchitecture\b",
+    r"\bdesign\b",
+    r"\bflow\b",
+    r"\bhook\b",
+    r"\bstep\b",
 ]
 
-# Phase 3 rejection patterns (code/implementation feedback)
+# Phase 3 rejection and solution sharing patterns (code/implementation feedback/guidance)
 _PHASE3_REJECTION_PATTERNS = [
     r"\bwrong\s+(?:api|method|class|signature|import|pattern)",
     r"\bfix\s+(?:the|this|your)",
@@ -141,21 +172,54 @@ _PHASE3_REJECTION_PATTERNS = [
     r"\bstyle\b.*\b(?:should|must|always|prefer)",
     r"\bnaming\b.*\b(?:should|convention|pattern)",
     r"\btoo\s+(?:many|much|long|short|complex|verbose)",
+    # Constructive solution sharing & instruction patterns:
+    r"\bneed to\b",
+    r"\bwe should\b",
+    r"\bmust\b",
+    r"\bmake sure\b",
+    r"\bplease\b",
+    r"\bthe logic\b",
+    r"\bthe code\b",
+    r"\bimplement\b",
+    r"\bcreate\b",
+    r"\bdefine\b",
+    r"\bhandle\b",
+    r"\badd\b",
+    r"\bpass\b",
+    r"\bcall\b",
+    r"\bquery\b",
+    r"\btable\b",
+    r"\bselect\b",
+    r"\bjoin\b",
+    r"\bwhere\b",
+    r"\bfrom\b",
+    r"\bhere is\b",
+    r"\buse\b",
+    r"\busing\b",
+    r"\bapi\b",
+    r"\bmethod\b",
+    r"\bclass\b",
+    r"\bfunction\b",
+    r"\bparameter\b",
+    r"\bvariable\b",
+    r"\bimport\b",
+    r"\bexception\b",
+    r"\berror\b",
 ]
 
 
 def detect_rejection(user_message, phase):
-    """Detect whether a user message is a rejection/modification request.
+    """Detect whether a user message is a rejection/modification request or solution description.
 
-    Uses phase-specific regex patterns to identify feedback that expresses
-    a reusable design or coding preference.
+    Uses phase-specific regex patterns to identify feedback or critical solution
+    information that expresses a reusable design preference, architectural constraint, or guideline.
 
     Args:
         user_message: The architect's message text.
         phase: Current phase number (2 or 3).
 
     Returns:
-        bool: True if the message likely contains a rejection or style feedback.
+        bool: True if the message likely contains a rejection, feedback, or solution details.
     """
     if not user_message or len(user_message.strip()) < 5:
         return False
