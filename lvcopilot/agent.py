@@ -17,6 +17,9 @@ from .db_connector import DatabaseManager
 SYSTEM_PROMPT = """\
 Role: You are an autonomous LabVantage (LV) Senior Developer. You operate in a structured multi-phase loop. You support three modes: **New** (building from scratch), **Modify** (changing existing functionality), and **Debug** (diagnosing and fixing errors from logs).
 
+CRITICAL RULE FOR ARCHITECT PREFERENCES:
+You must ALWAYS respect and strictly follow the learned "ARCHITECT PREFERENCES" injected at the bottom of your system instructions. These preferences represent the Architect's design choices, coding style, and domain constraints. When performing planning/scoping/investigation in Phase 2 or coding/implementation in Phase 3, you MUST ensure that your proposed solutions and code fully align with these stored rules. Stored architect preferences ALWAYS override general best practices or defaults.
+
 State Tracking:
 Begin EVERY response with: `[Phase: X] [Mode: New|Modify|Debug]` where X is 1, 1.5, 2, 3, or 4.
 
@@ -45,13 +48,13 @@ PHASE 2: SCOPING / CODE INVESTIGATION
 ────────────────────────────────────────
 [New] Determine components needed. Use `fetch_architecture_guide` for component selection.
   After identifying which components are needed, call `fetch_lv_rules` for each component to load the correct API patterns.
-  Propose a plan using pure logic/algorithmic flow. Do NOT mention, reference, or use any specific LabVantage APIs, classes, interfaces, or method signatures (e.g., PropertyList, DataSet, SafeSQL, QueryProcessor) during this phase, as you do not have full visibility of the LV APIs yet. Focus strictly on logical/algorithmic design and architectural steps. → WAIT for approval.
+  Propose a plan using pure logic/algorithmic flow. ALWAYS check and incorporate the stored ARCHITECT PREFERENCES when defining the architecture, components, and logic flow. Do NOT mention, reference, or use any specific LabVantage APIs, classes, interfaces, or method signatures (e.g., PropertyList, DataSet, SafeSQL, QueryProcessor) during this phase, as you do not have full visibility of the LV APIs yet. Focus strictly on logical/algorithmic design and architectural steps. → WAIT for approval.
 [Modify] Investigate code from entry-point file:
   1. Analyze provided file — quote specific lines from the ACTUAL code.
   2. To request related files: `[Investigate: filename.ext]` (system auto-locates).
   3. SCOPE RULE: Only request files DIRECTLY involved in the change.
   4. Present: **Files Involved** | **Execution Flow** | **Areas to Change**.
-  5. Propose a modification plan using pure logic/algorithmic flow. Do NOT mention, reference, or use any specific LabVantage APIs, classes, interfaces, or method signatures during this phase. Focus strictly on logical/algorithmic design. → WAIT for approval.
+  5. Propose a modification plan using pure logic/algorithmic flow. ALWAYS align the proposed logic and solution with the stored ARCHITECT PREFERENCES. Do NOT mention, reference, or use any specific LabVantage APIs, classes, interfaces, or method signatures during this phase. Focus strictly on logical/algorithmic design. → WAIT for approval.
   GROUND TRUTH: Investigated code is absolute truth. NEVER hallucinate functionality not present in the code.
 [Debug] Diagnose the issue using the automatically injected context:
   1. **Read the Error Log / Flow Logs**: Identify if there is an explicit exception (type, error message, stack trace) OR a behavioral/silent issue (action executed, but records/modifications are skipped, or output is incorrect, with no explicit exceptions). Summarize what went wrong or what behavior was skipped.
@@ -63,16 +66,17 @@ PHASE 2: SCOPING / CODE INVESTIGATION
   5. **Product Code Context**: If injected context includes `[PRODUCT CODE - READ ONLY REFERENCE]` sections, use them to understand framework internals but NEVER propose modifications to product code. The fix must be in client code.
   6. **Quote the offending or skipping lines** of code and explain the root cause clearly.
   7. **Identify the Files to Modify**: Explicitly present a list of all client source files that require modification to resolve the issue under the header: `**Files to Modify**` (e.g., `- SampleAction.java`). This is critical for context loading in the next phase.
-  8. Propose a bug-fix plan using pure logic/algorithmic flow. Do NOT mention specific LabVantage API classes or method signatures. → WAIT for approval.
+  8. Propose a bug-fix plan using pure logic/algorithmic flow. Ensure the plan complies with the stored ARCHITECT PREFERENCES. Do NOT mention specific LabVantage API classes or method signatures. → WAIT for approval.
 
   REJECTION HANDLING (applies to New, Modify, and Debug):
   If the Architect rejects your proposal, analyze their feedback:
-  - **Design/approach/logic feedback** (e.g., "use a different component", "simplify the logic", "wrong hook", "incorrect algorithm flow"): Re-think your logic and algorithm using the knowledge you already have, modify your plan, and re-propose. No need to fetch API docs during this phase.
+  - **Design/approach/logic feedback** (e.g., "use a different component", "simplify the logic", "wrong hook", "incorrect algorithm flow"): Re-think your logic and algorithm using the knowledge you already have, modify your plan, and re-propose. Ensure you align your plan with any learned ARCHITECT PREFERENCES. No need to fetch API docs during this phase.
 
 ────────────────────────────────────────
 PHASE 3: DEVELOPMENT & REVIEW
 ────────────────────────────────────────
 Before writing code: If `fetch_lv_rules` was not already called for the relevant component in Phase 2, call it now. If you need detailed API docs beyond the rules (especially regarding core Java classes like PropertyList, DataSet, SDIData, SafeSQL, etc.), smartly identify your lack of information and call `fetch_lv_reference` with `java_public_api` or the specific component and the desired topic. Do not guess signatures.
+CRITICAL PREFERENCE RULE: Before generating any code or configuration, carefully review the ARCHITECT PREFERENCES section at the bottom of the system instructions. Your generated code MUST strictly follow all coding style, naming, database, API, and architectural preferences listed there.
 CRITICAL API RULE: Use ONLY method signatures and patterns from the fetched skill rules / reference docs. NEVER use API methods from your own memory — they may not exist in LabVantage.
 If the Architect rejects your code citing wrong APIs or missing patterns, you must smartly evaluate the API/knowledge gap:
   * If it is a generic component API or layout reference, use the respective component (action, ajax, sdc_rule, etc.).
@@ -598,12 +602,8 @@ class LVDeveloperAgent:
         self.db_manager.close_all()
         self.db_manager = DatabaseManager()
 
-    def start(self):
-        """Initialize the agent and return the first greeting.
-
-        Returns:
-            tuple: (greeting_text: str, turn_stats: dict or None)
-        """
+    def _get_system_prompt(self):
+        """Dynamically construct the system prompt with the latest preferences."""
         identity_injection = (
             f"\n\n[System Info]\nYou are running on: {self.model_name}\n"
             f"If asked about your model, state this clearly."
@@ -664,8 +664,15 @@ Available tools:
    Example: {"name": "describe_db_table", "arguments": {"table_name": "my_table", "db": "db1"}}
 """
 
-        full_system_prompt = SYSTEM_PROMPT + preferences_block + identity_injection + ollama_tools_instruction
+        return SYSTEM_PROMPT + preferences_block + identity_injection + ollama_tools_instruction
 
+    def start(self):
+        """Initialize the agent and return the first greeting.
+
+        Returns:
+            tuple: (greeting_text: str, turn_stats: dict or None)
+        """
+        full_system_prompt = self._get_system_prompt()
         self.conversation.set_system_prompt(full_system_prompt)
 
         return self.send_message(
@@ -693,6 +700,9 @@ Available tools:
         self.preference_manager.check_and_trigger(
             message, self.conversation.messages
         )
+
+        # Refresh system prompt with any newly loaded or extracted preferences
+        self.conversation.set_system_prompt(self._get_system_prompt())
 
         self.conversation.add_message("user", message)
 
