@@ -27,7 +27,10 @@ class TestAgentPreferences(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Test response"
+        mock_response.choices[0].message.tool_calls = None
         mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 0
+        mock_response.usage.completion_tokens = 0
         mock_litellm.completion.return_value = mock_response
 
         agent = LVDeveloperAgent()
@@ -48,7 +51,10 @@ class TestAgentPreferences(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Test response"
+        mock_response.choices[0].message.tool_calls = None
         mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 0
+        mock_response.usage.completion_tokens = 0
         mock_litellm.completion.return_value = mock_response
 
         agent = LVDeveloperAgent()
