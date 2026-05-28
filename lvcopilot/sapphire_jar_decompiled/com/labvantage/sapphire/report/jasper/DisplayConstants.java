@@ -1,0 +1,134 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.sf.jasperreports.engine.type.HorizontalAlignEnum
+ */
+package com.labvantage.sapphire.report.jasper;
+
+import java.io.Serializable;
+import net.sf.jasperreports.engine.type.HorizontalAlignEnum;
+
+public interface DisplayConstants
+extends Serializable {
+    public static final byte INVALIDE_VALUE = -1;
+    public static final String PAGE_NUMBER_BUNDLE_KEY = "";
+    public static final String INDEX_BUNDLE_KEY = "";
+    public static final byte ALIGN_NONE = -1;
+    public static final byte ALIGN_RIGHT = HorizontalAlignEnum.RIGHT.getValue();
+    public static final byte ALIGN_LEFT = HorizontalAlignEnum.LEFT.getValue();
+    public static final byte ALIGN_CENTER = HorizontalAlignEnum.CENTER.getValue();
+    public static final byte ALIGN_JUSTIFIED = HorizontalAlignEnum.JUSTIFIED.getValue();
+    public static final byte DECORATION_NONE = 10;
+    public static final byte DECORATION_BOLD = 11;
+    public static final byte DECORATION_ITALIC = 12;
+    public static final byte DECORATION_BOLD_ITALIC = 13;
+    public static final byte BORDERS_NO_BORDER = 20;
+    public static final byte BORDERS_HORIZONTAL = 21;
+    public static final byte BORDERS_VERTIVAL = 22;
+    public static final byte BORDERS_ALL = 23;
+    public static final byte AGGREGATE_NONE = 0;
+    public static final byte AGGREGATE_COUNT = 1;
+    public static final byte AGGREGATE_SUM = 2;
+    public static final byte AGGREGATE_AVERAGE = 3;
+    public static final byte AGGREGATE_MIN = 4;
+    public static final byte AGGREGATE_MAX = 5;
+    public static final byte AGGREGATE_VARIANCE = 7;
+    public static final String AGGREGATE_SUM_VAL = "";
+    public static final String AGGREGATE_COUNT_VAL = "";
+    public static final String AGGREGATE_AVERAGE_VAL = "";
+    public static final String AGGREGATE_MAX_VAL = "";
+    public static final String AGGREGATE_MIN_VAL = "";
+    public static final String AGGREGATE_VARIANCE_VAL = "";
+    public static final String PAPER_SIZE_A5 = "a5";
+    public static final String PAPER_SIZE_A4 = "a4";
+    public static final String PAPER_SIZE_A3 = "a3";
+    public static final String PAPER_SIZE_A2 = "a2";
+    public static final String PAPER_SIZE_A1 = "a1";
+    public static final String POSITION_TYPE_FLOAT = "Float";
+    public static final String POSITION_TYPE_FIX_RELATIVE_TO_TOP = "FixRelativeToTop";
+    public static final String POSITION_TYPE_FIX_RELATIVE_TO_BOTTOM = "FixRelativeToBottom";
+    public static final String MODE_OPAQUE = "Opaque";
+    public static final String MODE_TRANSPARENT = "Transparent";
+    public static final String COLOR_BLACK = "black";
+    public static final String COLOR_BLUE = "blue";
+    public static final String COLOR_CYAN = "cyan";
+    public static final String COLOR_DARK_GRAY = "darkGray";
+    public static final String COLOR_GRAY = "gray";
+    public static final String COLOR_GREEN = "green";
+    public static final String COLOR_LIGHT_GRAY = "lightGray";
+    public static final String COLOR_MAGENTA = "magenta";
+    public static final String COLOR_ORANGE = "orange";
+    public static final String COLOR_PINK = "pink";
+    public static final String COLOR_RED = "red";
+    public static final String COLOR_YELLOW = "yellow";
+    public static final String COLOR_WHITE = "white";
+    public static final String HORIZONTAL_ALIGN_LEFT = "Left";
+    public static final String HORIZONTAL_ALIGN_CENTER = "Center";
+    public static final String HORIZONTAL_ALIGN_RIGHT = "Right";
+    public static final String HORIZONTAL_ALIGN_JUSTIFIED = "Justified";
+    public static final String VERTICAL_ALIGN_TOP = "Top";
+    public static final String VERTICAL_ALIGN_MIDDLE = "Middle";
+    public static final String VERTICAL_ALIGN_BOTTOM = "Bottom";
+    public static final String ROTATION_NONE = "None";
+    public static final String ROTATION_LEFT = "Left";
+    public static final String ROTATION_RIGHT = "Right";
+    public static final String RUN_DIRECTION_LTR = "LTR";
+    public static final String RUN_DIRECTION_RTL = "RTL";
+    public static final String LINE_SPACING_SINGLE = "Single";
+    public static final String LINE_SPACING_1_1_2 = "1_1_2";
+    public static final String LINE_SPACING_DOUBLE = "Double";
+    public static final String DIRECTION_TOP_DOWN = "TopDown";
+    public static final String DIRECTION_BOTTOM_UP = "BottomUp";
+    public static final String SCALE_IMAGE_CLIP = "Clip";
+    public static final String SCALE_IMAGE_FILL_FRAME = "FillFrame";
+    public static final String SCALE_IMAGE_RETAIN_SHAPE = "RetainShape";
+    public static final String ON_ERROR_TYPE_ERROR = "Error";
+    public static final String ON_ERROR_TYPE_BLANK = "Blank";
+    public static final String ON_ERROR_TYPE_ICON = "Icon";
+    public static final String STRETCH_TYPE_NO_STRETCH = "NoStretch";
+    public static final String STRETCH_TYPE_RELATIVE_TO_TALLEST_OBJECT = "RelativeToTallestObject";
+    public static final String STRETCH_TYPE_RELATIVE_TO_BAND_HEIGHT = "RelativeToBandHeight";
+    public static final String PEN_NONE = "None";
+    public static final String PEN_THIN = "Thin";
+    public static final String PEN_1_POINT = "1Point";
+    public static final String PEN_2_POINT = "2Point";
+    public static final String PEN_4_POINT = "4Point";
+    public static final String PEN_DOTTED = "Dotted";
+    public static final String FILL_SOLID = "Solid";
+    public static final String RESET_TYPE_NONE = "None";
+    public static final String RESET_TYPE_REPORT = "Report";
+    public static final String RESET_TYPE_PAGE = "Page";
+    public static final String RESET_TYPE_COLUMN = "Column";
+    public static final String RESET_TYPE_GROUP = "Group";
+    public static final String PRINT_ORDER_VERTICAL = "Vertical";
+    public static final String PRINT_ORDER_HORIZONTAL = "Horizontal";
+    public static final String ORIENTATION_PORTRAIT = "Portrait";
+    public static final String ORIENTATION_LANDSCAPE = "Landscape";
+    public static final String WHEN_NO_DATA_TYPE_NO_PAGES = "NoPages";
+    public static final String WHEN_NO_DATA_TYPE_BLANK_PAGE = "BlankPage";
+    public static final String WHEN_NO_DATA_TYPE_ALL_SECTIONS_NO_DETAIL = "AllSectionsNoDetail";
+    public static final String EVALUATION_TIME_NOW = "Now";
+    public static final String EVALUATION_TIME_REPORT = "Report";
+    public static final String EVALUATION_TIME_PAGE = "Page";
+    public static final String EVALUATION_TIME_COLUMN = "Column";
+    public static final String EVALUATION_TIME_GROUP = "Group";
+    public static final String HYPERLINK_TYPE_NONE = "None";
+    public static final String HYPERLINK_TYPE_REFERENCE = "Reference";
+    public static final String HYPERLINK_TYPE_LOCAL_ANCHOR = "LocalAnchor";
+    public static final String HYPERLINK_TYPE_LOCAL_PAGE = "LocalPage";
+    public static final String HYPERLINK_TYPE_REMOTE_ANCHOR = "RemoteAnchor";
+    public static final String HYPERLINK_TYPE_REMOTE_PAGE = "RemotePage";
+    public static final String HYPERLINK_TARGET_SELF = "Self";
+    public static final String HYPERLINK_TARGET_BLANK = "Blank";
+    public static final int COLUMN_HEADER_HEIGHT = 30;
+    public static final int COLUMN_HEIGHT = 25;
+    public static final int COLUMN_FONT_SIZE = 10;
+    public static final int COLUMN_HEADER_FONT_SIZE = 10;
+    public static final int COLUMN_WIDTH = 100;
+    public static final int PAGE_HEADER_FILTER_HEIGHT = 40;
+    public static final int PAGE_MARGIN_LEFT = 10;
+    public static final int PAGE_MARGIN_RIGHT = 10;
+    public static final String FILTER_CONDITION_PARAMETER_NAME = "filterCondition";
+}
+

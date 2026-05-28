@@ -169,13 +169,30 @@ class ConversationManager:
         # Keep system prompt (0) and last 4 messages
         system_msg = self.messages[0]
         recent_messages = self.messages[-4:]
+        
+        # Identify messages in stale_middle that contain full source files.
+        # We must preserve these in their original forms so the agent never forgets the full files.
         stale_middle = self.messages[1:-4]
+        to_summarize = []
+        to_keep = []
+        
+        for msg in stale_middle:
+            content = ""
+            if isinstance(msg, dict):
+                content = msg.get("content") or ""
+            elif hasattr(msg, "content"):
+                content = getattr(msg, "content", "") or ""
+                
+            if "--- Full Content of " in content or "[System Context — Full Client Source Files" in content:
+                to_keep.append(msg)
+            else:
+                to_summarize.append(msg)
 
-        if not stale_middle:
+        if not to_summarize:
             return
 
-        # Build conversation text for summarization
-        conversation_text = self._format_messages_for_summary(stale_middle)
+        # Build conversation text for summarization of non-code messages
+        conversation_text = self._format_messages_for_summary(to_summarize)
         prompt = _SUMMARIZATION_PROMPT.format(conversation_text=conversation_text)
 
         try:
@@ -195,8 +212,8 @@ class ConversationManager:
             ),
         }
 
-        # Replace the message list: system + summary + recent
-        self.messages = [system_msg, summary_msg] + recent_messages
+        # Replace the message list: system + to_keep + summary + recent
+        self.messages = [system_msg] + to_keep + [summary_msg] + recent_messages
         self._last_summary_turn = self.turn_count
 
     def prune_tool_results(self):

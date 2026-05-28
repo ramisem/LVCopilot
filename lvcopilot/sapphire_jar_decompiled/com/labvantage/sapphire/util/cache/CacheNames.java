@@ -1,0 +1,82 @@
+/*
+ * Decompiled with CFR 0.152.
+ */
+package com.labvantage.sapphire.util.cache;
+
+public interface CacheNames {
+    public static final String CACHE_ACTION_DEFINITION = "ActionDefinition";
+    public static final String CACHE_ACTION_ATTACHMENTS = "ActionAttachments";
+    public static final String CACHE_ACTION_PROPERTYLIST = "ActionPropertyList";
+    public static final String CACHE_ACTION_ROLES = "ActionRoles";
+    public static final String CACHE_CONNECTION_PROPERTIES = "Connection Properties";
+    public static final String CACHE_PROFILE_PROPERTIES = "ProfileProperties";
+    public static final String CACHE_PROPERTYTREE = "PropertyTree";
+    public static final String CACHE_PROPERTYTREEDEFINITION = "PropertyTreeDefinition";
+    public static final String CACHE_PROPERTYTREE_NODE = "PropertyTreeNode";
+    public static final String CACHE_SCHEDULE_EXCLUDES = "ScheduleExcludes";
+    public static final String CACHE_SCHEDULE_TASK_NODE_PROPERTIES = "ScheduleTaskNodeProperties";
+    public static final String CACHE_SCHEDULE_TASK_PROPERTYTREE = "ScheduleTaskPropertyTree";
+    public static final String CACHE_SCHEDULEGRID = "ScheduleGrid";
+    public static final String CACHE_SDC = "SDC";
+    public static final String CACHE_SDC_LINKDATA = "SDCLinkData";
+    public static final String CACHE_SYSCONFIG_PROPERTIES = "SysConfigProperties";
+    public static final String CACHE_WEBPAGE_ACCESS = "WebPageAccess";
+    public static final String CACHE_WEBPAGE_FILENAME = "WebPageFilename";
+    public static final String CACHE_WEBPAGE_PROPERTIES = "WebPageProperties";
+    public static final String CACHE_WEBPAGE_PROPERYTREE = "WebPagePropertyTree";
+    public static final String CACHE_WEBPAGE_TREEELEMENT = "WebPageTreeElement";
+    public static final String CACHE_WEBPAGE_USEROVERRIDES = "WebPageUserOverrides";
+    public static final String CACHE_WORKITEM = "Workitem";
+    public static final String CACHE_PARAMLIST = "ParamList";
+    public static final String CACHE_TESTMETHOD = "TestMethod";
+    public static final String CACHE_DEPARTMENT = "Department";
+    public static final String CACHE_PARAMLIST_CURRENTVERSION = "ParamList_CurrentVersion";
+    public static final String CACHE_SPECRULES = "SpecRules";
+    public static final String CACHE_DEFAULT_PAGE_EDITION = "DefaultPageEdition";
+    public static final String CACHE_TABLE_COLUMNS = "TableColumns";
+    public static final String CACHE_FORM_DEFINITION = "FormDefinition";
+    public static final String CACHE_EVENTMANAGER = "EventManager";
+    public static final String CACHE_EDITORSTYLE = "EditorStyle";
+    public static final String CACHE_STEPTYPE = "StepType";
+    public static final String CACHE_EXPRESSIONPREFIX = "ExpressionPrefixDef";
+    public static final String CACHE_IMAGEREF = "ImageRef";
+    public static final String CACHE_GIZMO = "Gizmo";
+    public static final String CACHE_GIZMO_DEFAULTS = "GizmoDefaults";
+    public static final String CACHE_GIZMODEF = "GizmoDef";
+    public static final String CACHE_GIZMODEF_SECURED = "GizmoDefSecured";
+    public static final String CACHE_GIZMODEF_USER = "GizmoDefUser";
+    public static final String CACHE_GIZMODEF_ASSETS = "GizmoDefAssets";
+    public static final String CACHE_GIZMODEF_ACCESS = "GizmoDefAccess";
+    public static final String CACHE_GIZMODEF_ALL = "GizmoDefAll";
+    public static final String CACHE_UNITCONVERSION = "UnitConversion";
+    public static final String CACHE_GUIMODES = "GUIModes";
+    public static final String CACHE_DATACHART = "DataCharts";
+    public static final String CACHE_TASKDEF = "TaskDef";
+    public static final String CACHE_TASKSTEPTYPEPROPS = "TaskStepTypeProps";
+    public static final String CACHE_TASKSTEPPROPS = "TaskStepProps";
+    public static final String CACHE_REFVALUES = "RefValues";
+    public static final String CACHE_CALENDAR = "Calendar";
+    public static final String CACHE_ASSIGNMENT_RESOURCEDATA = "AssignmentResourceData";
+    public static final String CACHE_USER_SCHEDULES = "UserSchedules";
+    public static final String CACHE_DEPARTMENT_SCHEDULE = "DepartmentSchedules";
+    public static final String CACHE_DEPARTMENTUSERS = "DepartmentUsers";
+    public static final String CACHE_EXTERNALAPP = "ExternalApp";
+    public static final String CACHE_AUTHTOKEN = "AuthToken";
+    public static final String CACHE_AUTHTOKEN_CONNECTIONID = "AuthTokenConnectionid";
+    public static final String CACHE_ATTACHMENTS_LOCALFILE = "AttachmentLocalFile";
+    public static final String CACHE_ATTACHMENTS_EXPLODEDPATH = "AttachmentExplodedPath";
+    public static final String CACHE_CLASSLOADERS = "ClassLoaders";
+    public static final String CACHE_APP_RESOURCE_TAGS = "AppResourceTags";
+    public static final String CACHE_APP_RESOURCE_SDIS = "AppResourceSdis";
+    public static final String CACHE_TRANSLATION_ELNSPREADSHEET = "TranslationELNSpreadsheet";
+    public static final String CACHE_PORTALDETAILS = "PortalDetails";
+    public static final String CACHE_PORTALPROPS = "PortalProps";
+    public static final String CACHE_PORTALAPPS = "PortalApps";
+    public static final String CACHE_PORTALCOMMANDS = "PortalCommands";
+    public static final String CACHE_APPDETAILS = "AppDetails";
+    public static final String CACHE_APPPROPERTYLIST = "AppPropertyList";
+    public static final String CACHE_CLIENT_TRANSLATION = "ClientTranslationCache";
+    public static final String CACHE_CLIENT_REFTYPE = "ClientRefTypeCache";
+    public static final String CACHE_CLIENT_EDITORSTYLE = "ClientEditorStyleCache";
+}
+

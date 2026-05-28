@@ -16,6 +16,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from .agent import LVDeveloperAgent
 from . import file_merger
 from . import code_investigator
+from . import error_parser
 from .db_connector import DatabaseConnector
 
 console = Console()
@@ -23,6 +24,95 @@ console = Console()
 # Track investigated file paths from Modify mode Phase 1.5
 # Maps basename -> absolute path so Phase 4 can auto-resolve without re-asking
 _investigated_files = {}
+
+
+def _resolve_investigated_file(filename):
+    """Smart path resolution for Phase 4 file saving.
+
+    Attempts to match the given filename against _investigated_files using:
+      1. Exact basename match
+      2. Case-insensitive basename match
+      3. Dot-separated FQCN extraction (e.g. 'com.client.actions.MyAction' → 'MyAction.java')
+
+    If no match is found in _investigated_files, performs a project-wide search
+    using code_investigator.find_file_in_project and registers the result.
+
+    Args:
+        filename: The filename (or FQCN-style name) to resolve.
+
+    Returns:
+        str or None: Absolute path to the file, or None if not found.
+    """
+    if not filename:
+        return None
+
+    # 1. Exact match
+    if filename in _investigated_files:
+        return _investigated_files[filename]
+
+    # 2. Case-insensitive match
+    filename_lower = filename.lower()
+    for tracked_name, tracked_path in _investigated_files.items():
+        if tracked_name.lower() == filename_lower:
+            return tracked_path
+
+    # 3. Dot-separated FQCN extraction
+    #    e.g. "com.client.actions.MyAction" → try "MyAction.java"
+    if '.' in filename:
+        parts = filename.rsplit('.', 1)
+        # If the last part is an extension (e.g. "java", "py"), extract basename
+        # e.g. "com.client.actions.MyAction.java" → basename = "MyAction", ext = "java"
+        name_part = parts[0]
+        ext_part = parts[1] if len(parts) > 1 else ''
+
+        if ext_part and len(ext_part) <= 5:
+            # Likely a real extension — extract basename from FQCN portion
+            basename_from_fqcn = name_part.rsplit('.', 1)[-1]
+            candidate = f"{basename_from_fqcn}.{ext_part}"
+        else:
+            # No extension — assume FQCN without ext, try common Java extension
+            basename_from_fqcn = filename.rsplit('.', 1)[-1]
+            candidate = f"{basename_from_fqcn}.java"
+
+        if candidate in _investigated_files:
+            return _investigated_files[candidate]
+        # Case-insensitive fallback for the FQCN candidate
+        candidate_lower = candidate.lower()
+        for tracked_name, tracked_path in _investigated_files.items():
+            if tracked_name.lower() == candidate_lower:
+                return tracked_path
+
+    # 4. Project-wide search fallback
+    search_roots = [os.getcwd()]
+    for abs_path in _investigated_files.values():
+        parent = os.path.dirname(abs_path)
+        if parent not in search_roots:
+            search_roots.append(parent)
+        grandparent = os.path.dirname(parent)
+        if grandparent and grandparent not in search_roots:
+            search_roots.append(grandparent)
+
+    found = code_investigator.find_file_in_project(filename, search_roots)
+    if found:
+        _investigated_files[filename] = found
+        return found
+
+    # Try the FQCN-derived candidate in the project as well
+    if '.' in filename:
+        if ext_part and len(ext_part) <= 5:
+            basename_from_fqcn = name_part.rsplit('.', 1)[-1]
+            candidate = f"{basename_from_fqcn}.{ext_part}"
+        else:
+            basename_from_fqcn = filename.rsplit('.', 1)[-1]
+            candidate = f"{basename_from_fqcn}.java"
+
+        found = code_investigator.find_file_in_project(candidate, search_roots)
+        if found:
+            _investigated_files[candidate] = found
+            return found
+
+    return None
+
 
 
 def _find_at_token(text):
@@ -258,6 +348,39 @@ def configure_llm():
         if db2_type:
             console.print(f"[dim]Database DB2 configured: {db2_type}[/dim]")
 
+    # ── Product Source Configuration (optional) ──
+    # Only prompt if no PRODUCT_SRC_DIR is already configured
+    product_src_dir = os.environ.get("PRODUCT_SRC_DIR", "").strip()
+    if not product_src_dir:
+        console.print("\n[bold cyan]Product Source Configuration (optional)[/bold cyan]")
+        console.print("[dim]Provide the path to sapphire_jar_decompiled to enable automated product-level log parsing.[/dim]")
+        
+        # Check if a folder named sapphire_jar_decompiled exists in the current directory
+        local_dir = os.path.join(os.getcwd(), 'sapphire_jar_decompiled')
+        default_prompt_val = local_dir if os.path.isdir(local_dir) else ""
+        
+        while True:
+            prompt_str = "Please enter the absolute path to 'sapphire_jar_decompiled' (optional, press Enter to skip)"
+            user_path = Prompt.ask(prompt_str, default=default_prompt_val).strip()
+            if not user_path:
+                break
+            
+            expanded_path = os.path.abspath(os.path.expanduser(user_path))
+            if os.path.isdir(expanded_path):
+                os.environ["PRODUCT_SRC_DIR"] = expanded_path
+                try:
+                    with open(env_path, 'a') as f:
+                        f.write(f"\nPRODUCT_SRC_DIR={expanded_path}\n")
+                    console.print(f"[green]Product Source directory configured successfully: {expanded_path}[/green]")
+                except Exception as e:
+                    console.print(f"[bold yellow]Warning: Could not save configuration to {env_path}: {e}[/bold yellow]")
+                break
+            else:
+                console.print(f"[bold red]Validation Error:[/bold red] '{user_path}' is not a valid directory on disk. Please enter a valid directory path or press Enter to skip.")
+    else:
+        console.print(f"[dim]Product Source directory configured: {product_src_dir}[/dim]")
+
+
 def process_at_references(user_input):
     # Match @ followed by non-space characters
     matches = set(re.findall(r'@([^\s]+)', user_input))
@@ -293,13 +416,15 @@ def process_at_references(user_input):
 
 
 def detect_agent_mode(response):
-    """Detect if agent is in Modify mode based on response markers.
+    """Detect if agent is in Modify, Debug, or New mode based on response markers.
     
     Returns:
-        str: 'modify' or 'new'
+        str: 'modify', 'debug', or 'new'
     """
     if re.search(r'\[Mode:\s*Modify\]', response, re.IGNORECASE):
         return 'modify'
+    if re.search(r'\[Mode:\s*Debug\]', response, re.IGNORECASE):
+        return 'debug'
     return 'new'
 
 
@@ -438,7 +563,7 @@ def _run_auto_investigation(agent, last_response):
         
         if not requested_files:
             # No more files requested — investigation is done
-            return
+            return last_response
         
         # Deduplicate and filter out already-investigated files
         unique_requests = []
@@ -450,7 +575,7 @@ def _run_auto_investigation(agent, last_response):
                 seen.add(fname)
         
         if not unique_requests:
-            return
+            return last_response
         
         console.print(f"\n[bold cyan]🔎 Auto-Investigation Round {round_num}[/bold cyan]")
         console.print(f"[dim]The agent needs {len(unique_requests)} more file(s):[/dim]")
@@ -501,6 +626,8 @@ def _run_auto_investigation(agent, last_response):
     
     if _parse_investigate_markers(last_response):
         console.print(f"[bold yellow]⚠️  Investigation round limit ({MAX_AUTO_INVESTIGATION_ROUNDS}) reached. The agent may continue with partial context.[/bold yellow]")
+        
+    return last_response
 
 
 def process_and_save_files(response, agent, session):
@@ -559,10 +686,12 @@ def process_and_save_files(response, agent, session):
         filename = entry['filename']
         lang = entry['lang']
         
-        # Check if this file was previously investigated (Modify mode)
-        # If so, auto-resolve the path without asking
-        if filename and filename in _investigated_files:
-            abs_path = _investigated_files[filename]
+        # Check if this file was previously investigated (Modify/Debug mode)
+        # Use smart resolution: exact, case-insensitive, FQCN, and project search
+        resolved_path = _resolve_investigated_file(filename) if filename else None
+        
+        if resolved_path:
+            abs_path = resolved_path
             console.print(f"\n[bold blue][LVCopilot][/bold blue] Modified file: [cyan]{filename}[/cyan] → {abs_path}")
             choice = Confirm.ask("Do you want to save the modified file?")
             
@@ -1137,15 +1266,110 @@ def main():
             with console.status("[bold green]🤖 LV Agent is thinking...[/bold green]", spinner="dots"):
                 processed_input = process_at_references(user_input)
                 
-                # In Modify mode, track any @referenced files so Phase 4
+                # In Modify/Debug mode, track any @referenced files so Phase 4
                 # can auto-resolve their paths without re-asking
-                if current_mode == 'modify':
+                if current_mode in ('modify', 'debug'):
                     at_paths = set(re.findall(r'@([^\s]+)', user_input))
                     for at_path in at_paths:
                         expanded = os.path.expanduser(at_path)
                         if os.path.isfile(expanded):
                             abs_ref = os.path.abspath(expanded)
                             _investigated_files[os.path.basename(abs_ref)] = abs_ref
+                
+                # ── Auto-Injection of Full Client Files on Transition to Phase 3 ──
+                if current_mode == 'debug' and _investigated_files:
+                    # Check if the previous assistant message was Phase 2
+                    last_msg = ""
+                    for msg in reversed(agent.conversation.messages):
+                        role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", "")
+                        if role == "assistant":
+                            last_msg = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", "")
+                            break
+                    
+                    if "[Phase: 2]" in last_msg:
+                        # Check if user input contains an approval/proceed keyword
+                        user_input_lower = user_input.lower().strip()
+                        approval_keywords = {
+                            "approve", "approved", "looks good", "proceed", "go ahead", "yes", 
+                            "ok", "okay", "fix it", "make the changes", "write the code", "do it", 
+                            "looks fine", "looks correct", "apply", "y", "sure", "go on"
+                        }
+                        if any(re.search(r'\b' + re.escape(kw) + r'\b', user_input_lower) for kw in approval_keywords):
+                            # Find all files whose full content is not yet in active history
+                            history_text = ""
+                            for msg in agent.conversation.messages:
+                                content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", "")
+                                history_text += content or ""
+                            
+                            full_file_contexts = []
+                            for basename, abs_path in _investigated_files.items():
+                                # Only pull the full file if it was identified for potential modification in the Phase 2 plan
+                                name_without_ext, _ = os.path.splitext(basename)
+                                if basename.lower() not in last_msg.lower() and name_without_ext.lower() not in last_msg.lower():
+                                    continue
+
+                                marker = f"--- Full Content of {basename} (for modification) ---"
+                                if marker not in history_text:
+                                    _, numbered = code_investigator.read_file_content(abs_path)
+                                    if numbered:
+                                        full_file_contexts.append(
+                                            f"\n\n--- Full Content of {basename} (for modification) ---\n"
+                                            f"{numbered}\n"
+                                            f"--- End of {basename} ---"
+                                        )
+                            
+                            if full_file_contexts:
+                                console.print("\n[bold magenta]📦 Plan approved — injecting full client file content for Phase 3 code generation...[/bold magenta]")
+                                processed_input += "\n\n[System Context — Full Client Source Files for Phase 3 Code Generation]" + "".join(full_file_contexts)
+                
+                # ── Error Log Detection & Auto-Investigation ──
+                # Scan user input for stack traces, SQL queries, and action calls.
+                # If detected, automatically locate source files and inject
+                # surrounding code context into the agent's prompt.
+                search_roots = [os.getcwd()]
+                for abs_path in _investigated_files.values():
+                    search_roots.append(os.path.dirname(abs_path))
+                
+                # Resolve product source directory:
+                # 1. Check if configured in environment variable PRODUCT_SRC_DIR
+                # 2. Check if a local 'sapphire_jar_decompiled' folder exists in the current working directory
+                # 3. Fall back to the packaged/base directory location
+                product_src_dir = os.environ.get('PRODUCT_SRC_DIR')
+                if not product_src_dir or not os.path.isdir(product_src_dir):
+                    local_path = os.path.join(os.getcwd(), 'sapphire_jar_decompiled')
+                    if os.path.isdir(local_path):
+                        product_src_dir = local_path
+                    else:
+                        product_src_dir = os.path.join(
+                            agent._get_base_dir(), 'sapphire_jar_decompiled'
+                        )
+
+                
+                error_result = error_parser.parse_error_log(
+                    processed_input, search_roots, product_src_dir
+                )
+                
+                if error_result['detected']:
+                    console.print("\n[bold magenta]🔍 Log pattern detected — auto-investigating source files...[/bold magenta]")
+                    # Register client files for Phase 4 auto-resolution
+                    for basename, abs_path in error_result['client_files'].items():
+                        _investigated_files[basename] = abs_path
+                        console.print(f"  📄 [green]Found client file: {abs_path}[/green]")
+                    # Append the investigation context to the user input
+                    processed_input += error_result['context']
+
+                    # ── Auto Schema Injection for SQL Tables ──
+                    # If table names are extracted from SQL, automatically describe them and inject schema
+                    if error_result.get('sql_tables') and agent.db_manager.has_any_configured():
+                        db_key = 'db1' if agent.db_manager.db1.is_configured() else 'db2'
+                        for table in error_result['sql_tables']:
+                            try:
+                                schema = agent.db_manager.get_connector(db_key).describe_table(table)
+                                if schema and 'Error' not in schema and 'not found or could not be described' not in schema:
+                                    processed_input += f"\n[Auto-Injected Schema for {table}]\n{schema}\n"
+                                    console.print(f"  🗃️  [green]Schema injected: {table}[/green]")
+                            except Exception:
+                                pass
                 
                 response, turn_stats = agent.send_message(processed_input)
                 
@@ -1160,6 +1384,9 @@ def main():
             if detected_mode == 'modify':
                 current_mode = 'modify'
                 console.print("[dim]📋 Mode: Modify — The agent will investigate existing code before proposing changes.[/dim]")
+            elif detected_mode == 'debug':
+                current_mode = 'debug'
+                console.print("[dim]🐛 Mode: Debug — The agent is diagnosing the error and will propose a fix.[/dim]")
             elif re.search(r'\[Phase:\s*1\]', response) and not re.search(r'\[Phase:\s*1\.5\]', response):
                 # Reset mode when agent returns to Phase 1 (new cycle)
                 current_mode = 'new'
@@ -1176,9 +1403,13 @@ def main():
                     
                     # Auto-investigation loop: detect [Investigate: filename] requests
                     # and auto-feed files back to the agent
-                    _run_auto_investigation(agent, investigation_response)
+                    response = _run_auto_investigation(agent, investigation_response)
                     
                 continue
+            
+            # Auto-investigation loop: if the response contains [Investigate: filename] markers, auto-feed files back
+            if _parse_investigate_markers(response):
+                response = _run_auto_investigation(agent, response)
             
             # Handle Phase 4 — File saving (both modes)
             # In Modify mode, the file merger will detect existing files

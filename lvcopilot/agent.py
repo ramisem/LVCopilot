@@ -15,19 +15,22 @@ from .db_connector import DatabaseManager
 
 # load_dotenv() is handled in main.py per project directory
 SYSTEM_PROMPT = """\
-Role: You are an autonomous LabVantage (LV) Senior Developer. You operate in a structured multi-phase loop. You support two modes: **New** (building from scratch) and **Modify** (changing existing functionality).
+Role: You are an autonomous LabVantage (LV) Senior Developer. You operate in a structured multi-phase loop. You support three modes: **New** (building from scratch), **Modify** (changing existing functionality), and **Debug** (diagnosing and fixing errors from logs).
 
 State Tracking:
-Begin EVERY response with: `[Phase: X] [Mode: New|Modify]` where X is 1, 1.5, 2, 3, or 4.
+Begin EVERY response with: `[Phase: X] [Mode: New|Modify|Debug]` where X is 1, 1.5, 2, 3, or 4.
 
 Knowledge Base:
 Rely on provided documents for all syntax, logic, and best practices. Use tools to fetch them when needed.
 
 ────────────────────────────────────────
-PHASE 1: REQUIREMENT ELICITATION
+PHASE 1: REQUIREMENT ELICITATION / ERROR TRIAGE
 ────────────────────────────────────────
 - Ask for the Business Requirement.
-- Detect mode: **[Mode: New]** → Phase 2. **[Mode: Modify]** → Phase 1.5.
+- Detect mode:
+  **[Mode: New]** → Phase 2.
+  **[Mode: Modify]** → Phase 1.5.
+  **[Mode: Debug]** → If the Architect shares an error log, stack trace, exception, or asks you to debug/fix an issue, set `[Mode: Debug]`. If source code context has been automatically injected by the system (look for `[System Context — Automated Error Log Investigation]`), skip directly to Phase 2. Otherwise, ask the Architect for the error log and transition to Phase 2 once received.
 
 ────────────────────────────────────────
 PHASE 1.5: INVESTIGATION SETUP [Modify only]
@@ -50,8 +53,19 @@ PHASE 2: SCOPING / CODE INVESTIGATION
   4. Present: **Files Involved** | **Execution Flow** | **Areas to Change**.
   5. Propose a modification plan using pure logic/algorithmic flow. Do NOT mention, reference, or use any specific LabVantage APIs, classes, interfaces, or method signatures during this phase. Focus strictly on logical/algorithmic design. → WAIT for approval.
   GROUND TRUTH: Investigated code is absolute truth. NEVER hallucinate functionality not present in the code.
+[Debug] Diagnose the issue using the automatically injected context:
+  1. **Read the Error Log / Flow Logs**: Identify if there is an explicit exception (type, error message, stack trace) OR a behavioral/silent issue (action executed, but records/modifications are skipped, or output is incorrect, with no explicit exceptions). Summarize what went wrong or what behavior was skipped.
+  2. **Action Call & Parameter Analysis**: Identify which action class was called and with which parameters from the log. Trace the execution of the code using those actual runtime parameter values to understand the failure or early exit path.
+  3. **SQL Query & Database Triage**: If the log contains a SQL query that was being executed, or if you need to verify the current state of records, evaluate whether executing it or triaging schemas would aid debugging. If yes, use `query_database` to run the query (or `describe_db_table` to inspect schemas) and analyze the results.
+  4. **Data-Driven & Logic-Driven Code Investigation**: Combine the database query results, runtime parameters, and source code context to pinpoint exactly *why* the failure or behavioral discrepancy occurred.
+     - For exceptions: "The query returned 0 rows → the code at line 42 called `dataset.getValue(0, ...)` without checking for empty results → NullPointerException."
+     - For behavioral/silent issues: Trace decision points, null checks, validation checks, and early exit/return statements. E.g. "Since the action was called with `status=Pending` in the log, the validation gate `if (!"Active".equals(status)) { return; }` at line 45 evaluated to true, silently skipping the record modification logic without throwing an error."
+  5. **Product Code Context**: If injected context includes `[PRODUCT CODE - READ ONLY REFERENCE]` sections, use them to understand framework internals but NEVER propose modifications to product code. The fix must be in client code.
+  6. **Quote the offending or skipping lines** of code and explain the root cause clearly.
+  7. **Identify the Files to Modify**: Explicitly present a list of all client source files that require modification to resolve the issue under the header: `**Files to Modify**` (e.g., `- SampleAction.java`). This is critical for context loading in the next phase.
+  8. Propose a bug-fix plan using pure logic/algorithmic flow. Do NOT mention specific LabVantage API classes or method signatures. → WAIT for approval.
 
-  REJECTION HANDLING (applies to both New and Modify):
+  REJECTION HANDLING (applies to New, Modify, and Debug):
   If the Architect rejects your proposal, analyze their feedback:
   - **Design/approach/logic feedback** (e.g., "use a different component", "simplify the logic", "wrong hook", "incorrect algorithm flow"): Re-think your logic and algorithm using the knowledge you already have, modify your plan, and re-propose. No need to fetch API docs during this phase.
 
@@ -85,11 +99,16 @@ Do NOT call `fetch_lv_reference` for every rejection — only when you genuinely
   CRITICAL: You are MODIFYING existing code. Base output on investigated code — do NOT generate from scratch.
   → WAIT for approval.
 
+[Debug] Show DIFF PREVIEW for each file that needs a fix (same format as Modify).
+  CRITICAL: You are FIXING existing code. Base the fix on the investigated code and the root-cause analysis from Phase 2.
+  → WAIT for approval.
+
 ────────────────────────────────────────
 PHASE 4: FILE GENERATION
 ────────────────────────────────────────
 [New] Output final code blocks. Prefix each with: `File: filename.ext`.
 [Modify] Output COMPLETE modified file content (full file, not just changes). Prefix each with: `File: filename.ext`.
+[Debug] Output COMPLETE fixed file content (full file, not just changes). Prefix each with: `File: filename.ext`.
 → WAIT for save confirmation, then return to Phase 1.
 
 ────────────────────────────────────────
@@ -102,6 +121,13 @@ Always use database connectivity tools when you need to inspect tables, write qu
 - `query_database`: Run a read-only SELECT statement. This query is automatically row-limited (default 50 rows).
 All operations are read-only. DML (INSERT, UPDATE, DELETE, MERGE) and DDL (CREATE, ALTER, DROP, TRUNCATE) are strictly blocked.
 Use the `db` parameter to target "db1" (Primary, default) or "db2" (Secondary, if configured).
+
+────────────────────────────────────────
+CRITICAL DATABASE QUERY REQUIREMENT
+────────────────────────────────────────
+- Whenever you are proposing, suggesting, or writing any database query (whether as a standalone SQL query in a plan/discussion, or embedded inside Java source code/SafeSQL/QueryProcessor during Phase 3, or in a system administration configuration guide, across ANY phase or ANY mode), you MUST first execute that query (or a representative version of it with sample/test parameters) against the connected database using the `query_database` tool.
+- You must NEVER suggest or write a query without first calling the `query_database` tool to verify it is syntactically valid and that all tables and columns exist.
+- Always include/mention the query verification results in your plan or response as proof of verification.
 """
 
 TOOLS = [
@@ -248,6 +274,134 @@ def parse_text_tool_call(text):
                         pass
                     break
     return None
+
+
+def extract_sql_queries(text):
+    """Extract potential SQL SELECT queries from the agent's response text."""
+    if not text:
+        return []
+    
+    matches = []
+    # Find whole word SELECT (case-insensitive)
+    for match in re.finditer(r'\bSELECT\b', text, re.IGNORECASE):
+        start = match.start()
+        # Check if the line containing this match is marked as WRONG or INCORRECT
+        line_start = text.rfind('\n', 0, start) + 1
+        line_end = text.find('\n', start)
+        if line_end == -1:
+            line_end = len(text)
+        line_of_code = text[line_start:line_end]
+        if any(marker in line_of_code for marker in ("// WRONG", "// INCORRECT", "Anti-Pattern", "anti-pattern", "Wrong example", "Incorrect example")):
+            continue
+
+        # Scan forward up to 500 characters
+        chunk = text[start:start+500]
+        
+        # Verify it looks like a database query by checking for 'FROM' within the first 250 chars
+        if not re.search(r'\bFROM\b', chunk[:250], re.IGNORECASE):
+            continue
+            
+        # Find a natural boundary
+        end_idx = len(chunk)
+        
+        # Stop at the first double quote
+        quote_idx = chunk.find('"')
+        if quote_idx != -1 and quote_idx > 5:
+            end_idx = min(end_idx, quote_idx)
+            
+        # Stop at the first semicolon
+        semi_idx = chunk.find(';')
+        if semi_idx != -1 and semi_idx > 5:
+            end_idx = min(end_idx, semi_idx + 1)
+            
+        # Stop if parenthesis balance goes negative (e.g. inside a function call)
+        parens = 0
+        for i, char in enumerate(chunk[:end_idx]):
+            if char == '(':
+                parens += 1
+            elif char == ')':
+                parens -= 1
+                if parens < 0:
+                    end_idx = min(end_idx, i)
+                    break
+                    
+        query = chunk[:end_idx].strip()
+        # Clean up quotes and trailing concatenations
+        query = re.sub(r'^[\"\']+', '', query)
+        query = re.sub(r'[\"\']+$', '', query)
+        query = query.strip()
+        
+        if len(query) > 12 and query not in matches:
+            matches.append(query)
+                
+    return matches
+
+
+def is_query_executed(query, messages):
+    """Check if a query has been executed in the conversation history via query_database."""
+    if not query:
+        return True
+
+    def normalize(q):
+        q_norm = q.lower().strip()
+        q_norm = re.sub(r'[\s\n\r\t]+', '', q_norm)
+        q_norm = re.sub(r'[\"\']', '', q_norm)
+        # Remove placeholders (e.g. :1, :param, ?)
+        q_norm = re.sub(r':\w+', '', q_norm)
+        q_norm = re.sub(r'\?', '', q_norm)
+        return q_norm
+
+    normalized_suggested = normalize(query)
+    if not normalized_suggested:
+        return True
+
+    for msg in reversed(messages):
+        # Check standard tool calls in message dicts or objects
+        tool_calls = None
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            tool_calls = msg.tool_calls
+        elif isinstance(msg, dict) and "tool_calls" in msg:
+            tool_calls = msg["tool_calls"]
+
+        if tool_calls:
+            for tc in tool_calls:
+                func_name = None
+                args_str = None
+                if hasattr(tc, "function"):
+                    func_name = tc.function.name
+                    args_str = tc.function.arguments
+                elif isinstance(tc, dict) and "function" in tc:
+                    func_name = tc["function"].get("name")
+                    args_str = tc["function"].get("arguments")
+
+                if func_name == "query_database" and args_str:
+                    try:
+                        args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                        tc_query = args.get("query", "")
+                        normalized_tc = normalize(tc_query)
+                        if normalized_suggested in normalized_tc or normalized_tc in normalized_suggested:
+                            return True
+                    except Exception:
+                        pass
+
+        # Check for text-based tool calls in assistant content
+        content = ""
+        if hasattr(msg, "content") and msg.content:
+            content = msg.content
+        elif isinstance(msg, dict) and "content" in msg:
+            content = msg.get("content") or ""
+
+        if content:
+            parsed = parse_text_tool_call(content)
+            if parsed:
+                parsed_tool, _ = parsed
+                if parsed_tool.get("name") == "query_database":
+                    tc_query = parsed_tool.get("arguments", {}).get("query", "")
+                    normalized_tc = normalize(tc_query)
+                    if normalized_suggested in normalized_tc or normalized_tc in normalized_suggested:
+                        return True
+
+    return False
 
 
 class LVDeveloperAgent:
@@ -569,6 +723,7 @@ Available tools:
 
         total_prompt = 0
         total_completion = 0
+        query_val_retries = 0
 
         try:
             while True:
@@ -650,6 +805,42 @@ Available tools:
                             and response_text
                             and '[Phase: 3]' in response_text):
                         response_text = self._run_validation(response_text)
+
+                    # ── Database Pre-Execution Validation (Any Phase, Any Mode) ──
+                    is_debug_phase2 = (
+                        response_text
+                        and '[Mode: Debug]' in response_text
+                        and '[Phase: 2]' in response_text
+                    )
+                    if (self.validation_enabled
+                            and response_text
+                            and self.db_manager.has_any_configured()
+                            and query_val_retries < 2
+                            and not is_debug_phase2):
+                        suggested_queries = extract_sql_queries(response_text)
+                        unexecuted_queries = [
+                            q for q in suggested_queries 
+                            if not is_query_executed(q, self.conversation.messages)
+                        ]
+                        if unexecuted_queries:
+                            query_val_retries += 1
+                            unexecuted_list_str = "\n".join(f"- {q}" for q in unexecuted_queries)
+                            feedback = (
+                                "[System: Database Query Verification Alert]\n"
+                                "You are proposing or suggesting the following database query/queries in your response, "
+                                "but you have not executed them against the connected database first:\n"
+                                f"{unexecuted_list_str}\n\n"
+                                "Per strict instructions, you MUST execute any database query you suggest "
+                                "first using the 'query_database' tool to verify its correctness, table/column existence, "
+                                "and syntax before outputting it. If the query requires placeholders/parameters, "
+                                "execute it with sample/test values.\n"
+                                "Please call the 'query_database' tool to execute these queries first, "
+                                "and then present your final response. Do NOT acknowledge this system message — "
+                                "just execute the tool and output the corrected response."
+                            )
+                            self.conversation.add_message("assistant", response_text)
+                            self.conversation.add_message("user", feedback)
+                            continue
 
                     self.conversation.add_message("assistant", response_text)
 
@@ -766,6 +957,11 @@ Available tools:
         for code in code_blocks:
             issues = self.validator.validate(code, component)
             all_issues.extend(issues)
+
+        # In Debug mode, only flag errors (skip warnings)
+        is_debug = response_text and '[Mode: Debug]' in response_text
+        if is_debug:
+            all_issues = [i for i in all_issues if getattr(i, 'severity', None) == "error"]
 
         if not all_issues:
             return response_text

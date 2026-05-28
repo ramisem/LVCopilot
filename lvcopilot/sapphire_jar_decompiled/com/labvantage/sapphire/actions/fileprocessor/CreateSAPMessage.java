@@ -1,0 +1,613 @@
+/*
+ * Decompiled with CFR 0.152.
+ */
+package com.labvantage.sapphire.actions.fileprocessor;
+
+import com.labvantage.opal.handler.ErrorUtil;
+import java.io.File;
+import java.io.FileWriter;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Random;
+import sapphire.SapphireException;
+import sapphire.accessor.ActionProcessor;
+import sapphire.action.BaseAction;
+import sapphire.util.DataSet;
+import sapphire.util.SDIData;
+import sapphire.util.SDIRequest;
+import sapphire.util.SafeSQL;
+import sapphire.util.StringUtil;
+import sapphire.xml.PropertyList;
+
+public class CreateSAPMessage
+extends BaseAction
+implements sapphire.action.CreateSAPMessage {
+    private static Random random = new Random();
+    private StringBuffer xmlString = new StringBuffer();
+    private String msgpath;
+    private String msgfilenamepattern;
+    private DataSet query;
+    private DataSet queryArg;
+    private DataSet colMaps;
+    private DataSet joinCriteria;
+    private final String KEY = "__Key";
+    private final String REF = "__Ref";
+    private final String PARAM = "__param";
+    private int keySeq = 0;
+
+    @Override
+    public void processAction(PropertyList properties) throws SapphireException {
+        this.logger.info("Started processing action CreateSAPMessage Action");
+        HashMap<String, DataSet> datasetList = new HashMap<String, DataSet>();
+        String sapmsgtypeid = properties.getProperty("sapmsgtypeid");
+        String sapmsgtypeversionid = properties.getProperty("sapmsgtypeversionid");
+        boolean isWS = "web".equalsIgnoreCase(properties.getProperty("mode"));
+        String processedBy = properties.getProperty("processedby", "");
+        String path = properties.getProperty("outputpath");
+        String filenamepattern = properties.getProperty("filenamepattern");
+        if (sapmsgtypeid.equals("")) {
+            throw new SapphireException("INVALID_PROPERTY The msgtypeid sapmsgtypeid is invalid.");
+        }
+        if (sapmsgtypeversionid.equals("")) {
+            throw new SapphireException("INVALID_PROPERTY The msgtypeversionid sapmsgtypeversionid is invalid.");
+        }
+        this.logger.info("Logging the mesaging processing in the SAPMsgLog ");
+        HashMap<String, String> logMap = new HashMap<String, String>();
+        logMap.put("sapmsgtypeid", sapmsgtypeid);
+        logMap.put("sapmsgtypeversionid", sapmsgtypeversionid);
+        if (!processedBy.equals("")) {
+            logMap.put("processedby", processedBy);
+        }
+        logMap.put("processeddt", "N");
+        logMap.put("sapmsglogdesc", "Started Processing");
+        logMap.put("outputpropertylist", properties.toXMLString());
+        logMap.put("processstatus", "Initial");
+        String msgLogId = this.addMsgLogEntry(this.getActionProcessor(), logMap);
+        if (msgLogId == null || msgLogId.equals("")) {
+            throw new SapphireException("Error could not update log");
+        }
+        try {
+            this.logger.info("Retrieving message details");
+            this.getMsgTypeDetails(sapmsgtypeid, sapmsgtypeversionid);
+            if (!isWS) {
+                if ((path == null || path.trim().equals("")) && ((path = this.msgpath) == null || path.trim().equals(""))) {
+                    throw new SapphireException("INVALID_PROPERTY File outputpath not defined  ");
+                }
+                if ((filenamepattern == null || filenamepattern.trim().equals("")) && ((filenamepattern = this.msgfilenamepattern) == null || filenamepattern.trim().equals(""))) {
+                    throw new SapphireException("INVALID_PROPERTY Filenamepattern not defined  ");
+                }
+            }
+            this.logger.info("Message details successfully retrieved");
+        }
+        catch (SapphireException e) {
+            this.logger.error("error retrieving message detail", e);
+            logMap = new HashMap();
+            logMap.put("sapmsglogdesc", "Failed to retrieve message");
+            logMap.put("notes", e.getMessage());
+            logMap.put("keyid1", msgLogId);
+            logMap.put("processstatus", "Failed");
+            this.updateMsgLogStatus(this.getActionProcessor(), logMap);
+            throw new SapphireException("Failed to get Configuration");
+        }
+        for (int i = 0; i < this.query.getRowCount(); ++i) {
+            try {
+                DataSet sourceDS;
+                String sqlString = this.query.getString(i, "sapquerytext");
+                String dataSetName = this.query.getString(i, "datablockname");
+                String queryid = this.query.getString(i, "sapqueryid");
+                String sappQueryid = this.query.getString(i, "queryid");
+                this.logger.info("Executing query : " + queryid);
+                if (sappQueryid != null && sappQueryid.length() > 0) {
+                    this.logger.info("executing sapphire query:" + queryid);
+                    String basedonid = this.query.getString(i, "basedonid");
+                    String[] params = new String[]{"", "", "", "", ""};
+                    this.logger.info("Checking for parameters");
+                    HashMap<String, String> filter = new HashMap<String, String>();
+                    filter.put("sapmsgtypeid", sapmsgtypeid);
+                    filter.put("sapmsgtypeversionid", sapmsgtypeversionid);
+                    filter.put("sapqueryid", queryid);
+                    DataSet filterDS = this.queryArg.getFilteredDataSet(filter);
+                    filterDS.sort("usersequence");
+                    for (int j = 0; j < filterDS.getRowCount(); ++j) {
+                        String sourceSapQueryid = filterDS.getValue(i, "sourcesapqueryid");
+                        String sourceColumnId = filterDS.getValue(i, "sourcesapcolumnid");
+                        String argValue = this.queryArg.getValue(i, "argvalue");
+                        if (sourceSapQueryid != null && !sourceSapQueryid.trim().equals("")) {
+                            sourceDS = (DataSet)datasetList.get(sourceSapQueryid);
+                            if (sourceDS == null) {
+                                this.logger.error("DataSource:" + sourceSapQueryid + " not found in memory");
+                                throw new SapphireException("DataSource:" + sourceSapQueryid + " not found in memory");
+                            }
+                            if (sourceColumnId == null || sourceColumnId.equals("")) {
+                                this.logger.error("Source columid not defined ");
+                                throw new SapphireException("Source columid not defined ");
+                            }
+                            if (!sourceDS.isValidColumn(sourceColumnId)) {
+                                this.logger.error("Source columid" + sourceColumnId + " not found in the dataset ");
+                                throw new SapphireException("Source columid" + sourceColumnId + " not found in the dataset ");
+                            }
+                            params[j] = sourceDS.getColumnValues(sourceColumnId, ";");
+                            continue;
+                        }
+                        params[j] = argValue != null && !argValue.trim().equals("") ? argValue : properties.getProperty(this.queryArg.getValue(j, "sapargid"));
+                    }
+                    this.createDataSet(datasetList, params, basedonid, sappQueryid, dataSetName, queryid);
+                    continue;
+                }
+                if (sqlString != null && sqlString.length() > 0) {
+                    this.logger.info("executing sec query:" + queryid);
+                    while (sqlString.indexOf("[") >= 0) {
+                        String variable = sqlString.substring(sqlString.indexOf("[") + 1, sqlString.indexOf("]"));
+                        HashMap<String, String> filter = new HashMap<String, String>();
+                        filter.put("sapmsgtypeid", sapmsgtypeid);
+                        filter.put("sapmsgtypeversionid", sapmsgtypeversionid);
+                        filter.put("sapqueryid", queryid);
+                        filter.put("sapargid", variable);
+                        DataSet filterVariable = this.queryArg.getFilteredDataSet(filter);
+                        if (filterVariable.getRowCount() <= 0) {
+                            this.logger.error("Variable mot defined ");
+                            throw new SapphireException("Variable not defined");
+                        }
+                        String argId = filterVariable.getString(0, "sapargid", "");
+                        String argVal = filterVariable.getString(0, "argvalue", "");
+                        String argType = filterVariable.getString(0, "argtype", "");
+                        String sourceQueryId = filterVariable.getString(0, "sourcesapqueryid", "");
+                        String sourceColumnId = filterVariable.getString(0, "sourcesapcolumnid", "");
+                        if (!argVal.equals("")) {
+                            sqlString = this.replaceVariable(argId, argVal, argType, sqlString);
+                            continue;
+                        }
+                        if (!sourceQueryId.equals("")) {
+                            sourceDS = (DataSet)datasetList.get(sourceQueryId);
+                            if (sourceDS == null) {
+                                this.logger.error("DataSource:" + sourceQueryId + " not found in memory");
+                                throw new SapphireException("DataSource:" + sourceQueryId + " not found in memory");
+                            }
+                            if (sourceColumnId == null || sourceColumnId.equals("")) {
+                                this.logger.error("Source columid not defined ");
+                                throw new SapphireException("Source columid not defined ");
+                            }
+                            if (!sourceDS.isValidColumn(sourceColumnId)) {
+                                this.logger.error("Source columid" + sourceColumnId + " not found in the dataset ");
+                                throw new SapphireException("Source columid" + sourceColumnId + " not found in the dataset ");
+                            }
+                            argVal = sourceDS.getColumnValues(sourceColumnId, ";");
+                            sqlString = this.replaceVariable(argId, argVal, argType, sqlString);
+                            continue;
+                        }
+                        argVal = properties.getProperty(variable);
+                        if (argVal == null || argVal.trim().equals("")) {
+                            throw new SapphireException("Variable " + variable + " is not present in Action Property!");
+                        }
+                        sqlString = this.replaceVariable(argId, argVal, argType, sqlString);
+                    }
+                    this.createDataSet(sqlString, datasetList, dataSetName, queryid);
+                    continue;
+                }
+                String datasetstr = properties.getProperty(queryid);
+                if (datasetstr != null) {
+                    DataSet ds = new DataSet(datasetstr);
+                    ds.addColumn("__param", 0);
+                    ds.setValue(0, "__param", dataSetName);
+                    ds.padColumn("__param");
+                    datasetList.put(queryid, ds);
+                    continue;
+                }
+                throw new SapphireException("Missing property " + queryid);
+            }
+            catch (Exception e) {
+                this.logger.error("Failed preparing data", e);
+                logMap = new HashMap();
+                logMap.put("sapmsglogdesc", "Failed preparing data");
+                logMap.put("notes", e.getMessage());
+                logMap.put("keyid1", msgLogId);
+                logMap.put("processstatus", "Failed");
+                this.updateMsgLogStatus(this.getActionProcessor(), logMap);
+                throw new SapphireException(ErrorUtil.extractMessageFromException(e, ErrorUtil.isUserAdmin(this.getConnectionId())));
+            }
+        }
+        logMap = new HashMap();
+        logMap.put("sapmsglogdesc", "Dataset creation completed...");
+        logMap.put("keyid1", msgLogId);
+        logMap.put("processstatus", "InProgress");
+        this.updateMsgLogStatus(this.getActionProcessor(), logMap);
+        try {
+            this.buildHeader(sapmsgtypeid, sapmsgtypeversionid);
+            this.buildData(this.query, datasetList, this.joinCriteria, this.colMaps);
+        }
+        catch (SapphireException e) {
+            this.logger.error("Error in creating the datasection", e);
+            logMap = new HashMap();
+            logMap.put("sapmsglogdesc", "Error creating the datasection");
+            logMap.put("notes", e.getMessage());
+            logMap.put("keyid1", msgLogId);
+            logMap.put("processstatus", "Failed");
+            this.updateMsgLogStatus(this.getActionProcessor(), logMap);
+            throw new SapphireException(ErrorUtil.extractMessageFromException(e, ErrorUtil.isUserAdmin(this.getConnectionId())));
+        }
+        this.buildFooter();
+        properties.setProperty("sapresponse", this.xmlString.toString());
+        try {
+            if (!isWS) {
+                this.createFile(filenamepattern, path, msgLogId);
+            }
+        }
+        catch (Exception e) {
+            this.logger.error("Error in writing the file", e);
+            logMap = new HashMap();
+            logMap.put("sapmsglogdesc", "Error in writing the file");
+            logMap.put("notes", e.getMessage());
+            logMap.put("keyid1", msgLogId);
+            logMap.put("processstatus", "Failed");
+            this.updateMsgLogStatus(this.getActionProcessor(), logMap);
+            throw new SapphireException(ErrorUtil.extractMessageFromException(e, ErrorUtil.isUserAdmin(this.getConnectionId())));
+        }
+    }
+
+    private void buildFooter() {
+        this.logger.info("Building the footer for the data ");
+        this.xmlString.append("</ZSEC>");
+    }
+
+    private DataSet convertColumnName(String queryid, DataSet ds1, DataSet colMaps) throws SapphireException {
+        DataSet ds = ds1.copy();
+        HashMap<String, String> temp = new HashMap<String, String>();
+        temp.put("sapqueryid", queryid);
+        DataSet colMap = colMaps.getFilteredDataSet(temp);
+        for (int i = 0; i < colMap.getRowCount(); ++i) {
+            String sapcolumnid = colMap.getString(i, "sapcolumnid");
+            String externalcolumnid = colMap.getString(i, "externalcolumnid");
+            ds.addColumn(externalcolumnid, ds.getColumnType(sapcolumnid));
+            String tempcolvalue = ds.getColumnValues(sapcolumnid, ";");
+            ds.addColumnValues(externalcolumnid, ds.getColumnType(sapcolumnid), tempcolvalue, ";");
+        }
+        this.fillKeyIds(ds);
+        return ds;
+    }
+
+    private DataSet getColumnMapping(String sapmsgtypeid, String sapmsgtypeversionid) throws SapphireException {
+        SafeSQL safeSQL = new SafeSQL();
+        StringBuffer sql = new StringBuffer("Select * from sapmsgquerycolumnmap where sapmsgtypeid=");
+        sql.append(safeSQL.addVar(sapmsgtypeid));
+        sql.append(" and sapmsgtypeversionid=");
+        sql.append(safeSQL.addVar(sapmsgtypeversionid));
+        this.database.createPreparedResultSet(sql.toString(), safeSQL.getValues());
+        DataSet ds = new DataSet(this.database.getResultSet());
+        this.database.closeResultSet();
+        return ds;
+    }
+
+    private String replaceVariable(String argId, String argVal, String argType, String sqlString) {
+        String match = "[" + argId + "]";
+        StringBuffer sqlBuffer = new StringBuffer(sqlString);
+        while (sqlBuffer.indexOf(match) >= 0) {
+            String leftSide = this.stripExtraCharacter(sqlBuffer.substring(0, sqlBuffer.indexOf(match) - 1), "left");
+            String rightSide = this.stripExtraCharacter(sqlBuffer.substring(sqlBuffer.indexOf(match) + match.length()), "right");
+            String[] argValArr = StringUtil.split(argVal, ";");
+            sqlBuffer.delete(0, sqlBuffer.length());
+            if (argValArr.length > 1) {
+                sqlBuffer.append(leftSide);
+                sqlBuffer.append(" in (");
+                if (argType.equals("STRING")) {
+                    for (int j = 0; j < argValArr.length; ++j) {
+                        sqlBuffer.append(j != 0 ? "," : "").append("'").append(argValArr[j]).append("'");
+                    }
+                    sqlBuffer.append(")");
+                }
+                sqlBuffer.append(rightSide);
+                continue;
+            }
+            sqlBuffer.append(leftSide);
+            sqlBuffer.append(" ='");
+            if (argType.equals("STRING") || argType.equals("DATE")) {
+                sqlBuffer.append(argVal);
+                sqlBuffer.append("'");
+            } else if (argType.equals("NUMBER")) {
+                sqlBuffer.append(argVal);
+            }
+            sqlBuffer.append(rightSide);
+        }
+        return sqlBuffer.toString();
+    }
+
+    private String stripExtraCharacter(String s, String direction) {
+        if ((s = s.trim()).equals("'")) {
+            return "";
+        }
+        if (direction.equals("left")) {
+            for (int i = s.length() - 1; i > 0; ++i) {
+                if (s.charAt(i) != '=') continue;
+                return s.substring(0, i);
+            }
+        } else if (s.startsWith("'")) {
+            return s.substring(1);
+        }
+        return s;
+    }
+
+    private void createDataSet(String sqlString, HashMap datasetList, String paramName, String queryId) throws SapphireException {
+        this.database.createResultSet(sqlString);
+        DataSet ds = new DataSet(this.database.getResultSet());
+        this.database.closeResultSet();
+        ds.addColumn("__param", 0);
+        ds.addColumnValues("__param", 0, "", ";", paramName);
+        ds.addColumn("__Key", 0);
+        ds.addColumn("__Ref", 0);
+        datasetList.put(queryId, ds);
+    }
+
+    private void createDataSet(HashMap datasetList, String[] param, String sdcId, String sappQueryid, String paramName, String queryId) {
+        SDIRequest request = new SDIRequest();
+        request.setSDCid(sdcId);
+        request.setQueryid(sappQueryid);
+        request.setRequestItem("primary");
+        request.setQueryParams(param);
+        SDIData sdidata = this.getSDIProcessor().getSDIData(request);
+        DataSet ds = sdidata.getDataset("primary");
+        ds.addColumn("__param", 0);
+        ds.addColumnValues("__param", 0, "", ";", paramName);
+        ds.addColumn("__Key", 0);
+        ds.addColumn("__Ref", 0);
+        datasetList.put(queryId, ds);
+    }
+
+    private DataSet getQueryArgConfiguration(String sapmsgtypeid, String sapmsgtypeversionid) throws SapphireException {
+        SafeSQL safeSQL = new SafeSQL();
+        StringBuffer sql = new StringBuffer("Select * from sapmsgqueryarg where sapmsgtypeid=");
+        sql.append(safeSQL.addVar(sapmsgtypeid));
+        sql.append(" and sapmsgtypeversionid=");
+        sql.append(safeSQL.addVar(sapmsgtypeversionid));
+        sql.append(" order by usersequence");
+        this.database.createPreparedResultSet(sql.toString(), safeSQL.getValues());
+        DataSet ds = new DataSet(this.database.getResultSet());
+        this.database.closeResultSet();
+        return ds;
+    }
+
+    private DataSet getQueryConfiguration(String sapmsgtypeid, String sapmsgtypeversionid) throws SapphireException {
+        SafeSQL safeSQL = new SafeSQL();
+        StringBuffer sql = new StringBuffer("Select * from sapmsgquery where sapmsgtypeid=");
+        sql.append(safeSQL.addVar(sapmsgtypeid));
+        sql.append(" and sapmsgtypeversionid=");
+        sql.append(safeSQL.addVar(sapmsgtypeversionid));
+        sql.append(" order by sapquerysequence");
+        this.database.createPreparedResultSet(sql.toString(), safeSQL.getValues());
+        DataSet ds = new DataSet(this.database.getResultSet());
+        this.database.closeResultSet();
+        return ds;
+    }
+
+    private DataSet getJoinConfiguration(String sapmsgtypeid, String sapmsgtypeversionid) throws SapphireException {
+        SafeSQL safeSQL = new SafeSQL();
+        StringBuffer sql = new StringBuffer("Select * from sapmsgjoin where sapmsgtypeid=");
+        sql.append(safeSQL.addVar(sapmsgtypeid));
+        sql.append(" and sapmsgtypeversionid=");
+        sql.append(safeSQL.addVar(sapmsgtypeversionid));
+        this.database.createPreparedResultSet(sql.toString(), safeSQL.getValues());
+        DataSet ds = new DataSet(this.database.getResultSet());
+        this.database.closeResultSet();
+        return ds;
+    }
+
+    private void getMsgTypeDetails(String sapmsgtypeid, String sapmsgtypeversionid) throws SapphireException {
+        this.logger.info("Getting msg configuration detail ");
+        SafeSQL safeSQL = new SafeSQL();
+        StringBuffer sql = new StringBuffer("Select * from sapmsgtype where sapmsgtypeid=");
+        sql.append(safeSQL.addVar(sapmsgtypeid));
+        sql.append(" and sapmsgtypeversionid=");
+        sql.append(safeSQL.addVar(sapmsgtypeversionid));
+        sql.append(" and directionflag='O'");
+        this.database.createPreparedResultSet(sql.toString(), safeSQL.getValues());
+        DataSet msgDetail = new DataSet(this.database.getResultSet());
+        if (msgDetail.getRowCount() == 0) {
+            throw new SapphireException("Error getting Configuration detail of the Sapmsgtype= " + sapmsgtypeid + " and versionid= " + sapmsgtypeid);
+        }
+        this.msgpath = msgDetail.getValue(0, "outputpath");
+        this.msgfilenamepattern = msgDetail.getValue(0, "filennamepattern");
+        this.query = this.getQueryConfiguration(sapmsgtypeid, sapmsgtypeversionid);
+        this.queryArg = this.getQueryArgConfiguration(sapmsgtypeid, sapmsgtypeversionid);
+        this.colMaps = this.getColumnMapping(sapmsgtypeid, sapmsgtypeversionid);
+        this.joinCriteria = this.getJoinCriteriaConfiguration(sapmsgtypeid, sapmsgtypeversionid);
+    }
+
+    private DataSet getJoinCriteriaConfiguration(String sapmsgtypeid, String sapmsgtypeversionid) throws SapphireException {
+        SafeSQL safeSQL = new SafeSQL();
+        StringBuffer sql = new StringBuffer("Select * from sapmsgjoincriteria where sapmsgtypeid=");
+        sql.append(safeSQL.addVar(sapmsgtypeid));
+        sql.append(" and sapmsgtypeversionid=");
+        sql.append(safeSQL.addVar(sapmsgtypeversionid));
+        this.database.createPreparedResultSet(sql.toString(), safeSQL.getValues());
+        DataSet ds = new DataSet(this.database.getResultSet());
+        this.database.closeResultSet();
+        return ds;
+    }
+
+    private String getUUID() {
+        int count = 20;
+        int start1 = 48;
+        int end1 = 58;
+        int start2 = 65;
+        int end2 = 91;
+        int start3 = 97;
+        int end3 = 123;
+        StringBuffer buffer = new StringBuffer();
+        int gap1 = end1 - start1;
+        int gap2 = end2 - start2;
+        int gap3 = end3 - start3;
+        while (count-- != 0) {
+            char ch1 = (char)(random.nextInt(gap1) + start1);
+            char ch2 = (char)(random.nextInt(gap2) + start2);
+            char ch3 = (char)(random.nextInt(gap3) + start3);
+            double choice = random.nextGaussian();
+            if (choice > 1.0) {
+                buffer.append(ch1);
+                continue;
+            }
+            if (choice > -1.0 && choice <= 1.0) {
+                buffer.append(ch2);
+                continue;
+            }
+            if (!(choice <= -1.0)) continue;
+            buffer.append(ch3);
+        }
+        return buffer.toString();
+    }
+
+    private void buildHeader(String msgtypeId, String msgtypeVersionId) {
+        this.xmlString.append("<?xml version=\"1.0\" encoding=\"UTF-8\" ?>");
+        this.xmlString.append("<ZSEC xsi:noNamespaceSchemaLocation=\"sec.xsd\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\n");
+        this.xmlString.append("<ZHeader>\n");
+        this.xmlString.append("<ZMessage>\n");
+        this.xmlString.append("<MsgID>");
+        this.xmlString.append(this.getUUID());
+        this.xmlString.append("</MsgID>\n");
+        this.xmlString.append("<MsgType>");
+        this.xmlString.append("GEN");
+        this.xmlString.append("</MsgType>\n");
+        this.xmlString.append("<MsgName>");
+        this.xmlString.append(msgtypeId);
+        this.xmlString.append("</MsgName>\n");
+        this.xmlString.append("<MsgFlow>");
+        this.xmlString.append("OUT");
+        this.xmlString.append("</MsgFlow>\n");
+        this.xmlString.append("<MsgDBID>");
+        this.xmlString.append("");
+        this.xmlString.append("</MsgDBID>\n");
+        this.xmlString.append("<MsgVersion>");
+        this.xmlString.append(msgtypeVersionId);
+        this.xmlString.append("</MsgVersion>\n");
+        this.xmlString.append("</ZMessage>\n<ZMeta-Data>\n<PrevID />\n<Error />\n<Acknowledge />\n<Success />\n</ZMeta-Data>\n</ZHeader>\n");
+    }
+
+    private void buildData(DataSet query, HashMap dataSetList, DataSet joinCriteria, DataSet colMaps) throws SapphireException {
+        HashMap<String, DataSet> hm = new HashMap<String, DataSet>();
+        for (int i = 0; i < query.getRowCount(); ++i) {
+            HashMap<String, String> temp;
+            String queryId = query.getString(i, "sapqueryid");
+            DataSet queryDS1 = (DataSet)dataSetList.get(queryId);
+            DataSet queryDS = this.convertColumnName(queryId, queryDS1, colMaps);
+            hm.put(queryId, queryDS);
+            if (dataSetList.containsKey(queryId)) {
+                temp = new HashMap<String, String>();
+                temp.put("rightsapqueryid", queryId);
+                DataSet criterias = joinCriteria.getFilteredDataSet(temp);
+                if (criterias.getRowCount() > 0) {
+                    DataSet leftQuery = (DataSet)dataSetList.get(criterias.getString(0, "leftsapqueryid"));
+                    DataSet leftChangedQuery = (DataSet)hm.get(criterias.getString(0, "leftsapqueryid"));
+                    for (int iIndex = 0; iIndex < leftQuery.getRowCount(); ++iIndex) {
+                        for (int kIndex = 0; kIndex < queryDS.getRowCount(); ++kIndex) {
+                            boolean match = true;
+                            for (int jIndex = 0; jIndex < criterias.getRowCount(); ++jIndex) {
+                                if (leftQuery.getValue(iIndex, criterias.getString(jIndex, "leftsapcolumnid")).equals(queryDS1.getValue(kIndex, criterias.getString(jIndex, "rightsapcolumnid")))) continue;
+                                match = false;
+                            }
+                            if (!match) continue;
+                            queryDS.setString(kIndex, "__Ref", leftChangedQuery.getValue(iIndex, "__Key"));
+                        }
+                    }
+                }
+            } else {
+                throw new SapphireException("Invalid configuration, Query not processed!");
+            }
+            temp = new HashMap();
+            temp.put("sapqueryid", queryId);
+            this.writeDataSet(queryDS, colMaps.getFilteredDataSet(temp));
+        }
+    }
+
+    private void fillKeyIds(DataSet qDS) {
+        for (int i = 0; i < qDS.getRowCount(); ++i) {
+            qDS.setString(i, "__Key", ++this.keySeq + "");
+        }
+    }
+
+    private void writeDataSet(DataSet queryDS, DataSet colMap) {
+        String param = queryDS.getString(0, "__param");
+        if (colMap == null && colMap.getRowCount() <= 0) {
+            return;
+        }
+        for (int i = 0; i < queryDS.getRowCount(); ++i) {
+            this.xmlString.append("<ZData>\n");
+            this.xmlString.append("<Key>");
+            this.xmlString.append(queryDS.getValue(i, "__Key"));
+            this.xmlString.append("</Key>\n");
+            this.xmlString.append("<Ref>");
+            this.xmlString.append(queryDS.getValue(i, "__Ref", ""));
+            this.xmlString.append("</Ref>\n");
+            this.xmlString.append("<ParamName>");
+            this.xmlString.append(param);
+            this.xmlString.append("</ParamName>\n");
+            this.xmlString.append("<ZColumns>\n");
+            for (int j = 0; j < colMap.getRowCount(); ++j) {
+                String colname = colMap.getValue(j, "externalcolumnid");
+                this.xmlString.append("<ZColumn>\n");
+                this.xmlString.append("<ColumnKey>");
+                this.xmlString.append(colname);
+                this.xmlString.append("</ColumnKey>\n");
+                this.xmlString.append("<ColumnVal><![CDATA[");
+                String val = queryDS.getValue(i, colname);
+                if (val != null) {
+                    if (queryDS.getColumnType(colname) == 2) {
+                        if (queryDS.getCalendar(i, colname) != null) {
+                            this.xmlString.append(new SimpleDateFormat("dd.MM.yyyy").format(queryDS.getCalendar(i, colname).getTime()));
+                        }
+                    } else {
+                        this.xmlString.append((Object)val);
+                    }
+                }
+                this.xmlString.append("]]></ColumnVal>\n");
+                this.xmlString.append("<ColumnType>");
+                this.xmlString.append(queryDS.getColumnType(colname) == 2 ? "DATE" : (queryDS.getColumnType(colname) == 0 ? "STRING" : (queryDS.getColumnType(colname) == 1 ? "NUMBER" : "UNKNOWN")));
+                this.xmlString.append("</ColumnType>\n");
+                this.xmlString.append("</ZColumn>\n");
+            }
+            this.xmlString.append("</ZColumns>\n");
+            this.xmlString.append("</ZData>\n\n");
+        }
+    }
+
+    private void createFile(String filePatternName, String path, String msgLogId) throws Exception {
+        if (!(path = path.replace('\\', '/')).endsWith("/")) {
+            path = path + "/";
+        }
+        String filename = filePatternName + new Date().getTime() + ".xml";
+        File fileOut = new File(path + filename);
+        FileWriter fw = new FileWriter(fileOut);
+        fw.write(this.xmlString.toString());
+        fw.close();
+        fileOut = null;
+        HashMap<String, String> logMap = new HashMap<String, String>();
+        logMap.put("sapmsglogdesc", "File created successfully");
+        logMap.put("keyid1", msgLogId);
+        logMap.put("currentpath", path);
+        logMap.put("currentfilename", filename);
+        logMap.put("processstatus", "Completed");
+        this.updateMsgLogStatus(this.getActionProcessor(), logMap);
+    }
+
+    private void updateMsgLogStatus(ActionProcessor ap, HashMap actionProps) {
+        try {
+            actionProps.put("sdcid", "LV_SAPMsgLog");
+            ap.processAction("EditSDI", "1", actionProps, true);
+        }
+        catch (SapphireException se) {
+            this.logger.error("Fail to update Msglog", se);
+        }
+    }
+
+    private String addMsgLogEntry(ActionProcessor ap, HashMap actionProps) throws SapphireException {
+        String msgLogid = null;
+        try {
+            actionProps.put("sdcid", "LV_SAPMsgLog");
+            ap.processAction("AddSDI", "1", actionProps, true);
+            msgLogid = (String)actionProps.get("newkeyid1");
+        }
+        catch (SapphireException se) {
+            this.logger.error("Fail to addsave log for the file", se);
+            throw se;
+        }
+        return msgLogid;
+    }
+}
+
