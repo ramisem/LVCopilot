@@ -778,18 +778,22 @@ def process_and_save_files(response, agent, session):
         last_line = lines_before[-1] if lines_before else ""
         
         filename = None
+        agent_path = None
         
         # Regex to extract a file name with an extension from the last line
         path_pattern = r'([a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9]{2,})'
         path_match = re.search(path_pattern, last_line)
         if path_match:
-            # Extract just the basename so the agent only decides the file name
-            filename = os.path.basename(path_match.group(1).strip())
+            matched_str = path_match.group(1).strip()
             # Clean up common markdown artifacts
-            filename = filename.strip('*_`\"\' ')
+            matched_str = matched_str.strip('*_`\"\' ')
+            agent_path = matched_str
+            # Extract just the basename so the agent only decides the file name
+            filename = os.path.basename(matched_str)
         
         file_entries.append({
             'filename': filename,
+            'agent_path': agent_path,
             'lang': lang,
             'code': code,
             'abs_path': None,
@@ -803,21 +807,30 @@ def process_and_save_files(response, agent, session):
     for entry in file_entries:
         filename = entry['filename']
         lang = entry['lang']
+        agent_path = entry.get('agent_path')
         
         # Check if this file was previously investigated (Modify/Debug mode)
         # Use smart resolution: exact, case-insensitive, FQCN, and project search
         resolved_path = _resolve_investigated_file(filename) if filename else None
         
+        # If not resolved via investigated files, but the agent provided a path containing directory separators
+        if not resolved_path and agent_path and ('/' in agent_path or '\\' in agent_path):
+            resolved_path = os.path.abspath(os.path.expanduser(agent_path))
+        
         if resolved_path:
             abs_path = resolved_path
-            console.print(f"\n[bold blue][LVCopilot][/bold blue] Modified file: [cyan]{filename}[/cyan] → {abs_path}")
-            choice = Confirm.ask("Do you want to save the modified file?")
+            exists, existing_content = file_merger.detect_existing_file(abs_path)
+            
+            label = "Modified file" if exists else "New file"
+            prompt_msg = "Do you want to save the modified file?" if exists else "Do you want to save this new file?"
+            
+            console.print(f"\n[bold blue][LVCopilot][/bold blue] {label}: [cyan]{filename}[/cyan] → {abs_path}")
+            choice = Confirm.ask(prompt_msg)
             
             if not choice:
                 console.print("⏭️  [dim]Skipped.[/dim]")
                 continue
             
-            exists, existing_content = file_merger.detect_existing_file(abs_path)
             entry['filename'] = filename
             entry['abs_path'] = abs_path
             entry['exists'] = exists
