@@ -463,7 +463,7 @@ def handle_investigation_phase(session, agent_response=None):
         str: The user's text combined with investigation context for all files,
              ready to send to the agent.
     """
-    console.print("\n[bold cyan]📂 Investigation Mode[/bold cyan]")
+    console.print("\n[bold cyan][DIR] Investigation Mode[/bold cyan]")
     console.print("[dim]The agent needs to understand the existing code before proposing changes.[/dim]")
     
     from prompt_toolkit.formatted_text import HTML as _HTML
@@ -478,7 +478,7 @@ def handle_investigation_phase(session, agent_response=None):
         requested_files = _parse_investigate_markers(agent_response)
         
     if requested_files:
-        console.print("\n[bold cyan]🔎 Auto-Resolving Agent's Investigation Requests...[/bold cyan]")
+        console.print("\n[bold cyan][SEARCH] Auto-Resolving Agent's Investigation Requests...[/bold cyan]")
         
         # Build search roots
         search_roots = set()
@@ -501,16 +501,16 @@ def handle_investigation_phase(session, agent_response=None):
                     matches = [candidate_path]
             
             if not matches:
-                console.print(f"  ❌ [yellow]Could not find '{fname}' in project/product search roots.[/yellow]")
+                console.print(f"  [ERROR] [yellow]Could not find '{fname}' in project/product search roots.[/yellow]")
                 continue
                 
             selected_path = None
             if len(matches) == 1:
                 selected_path = matches[0]
-                console.print(f"  ✅ [green]Found exactly one match for '{fname}':[/green] [dim]{selected_path}[/dim]")
+                console.print(f"  [OK] [green]Found exactly one match for '{fname}':[/green] [dim]{selected_path}[/dim]")
             else:
                 # Multiple matches! Present interactive selection menu
-                console.print(f"\n  [bold yellow]⚠️ Multiple matches found for '{fname}':[/bold yellow]")
+                console.print(f"\n  [bold yellow][!] Multiple matches found for '{fname}':[/bold yellow]")
                 for idx, path in enumerate(matches, 1):
                     console.print(f"    [{idx}] {path}")
                 choices = [str(i) for i in range(1, len(matches) + 1)]
@@ -518,7 +518,7 @@ def handle_investigation_phase(session, agent_response=None):
                 selected_path = matches[int(choice) - 1]
                 
             if selected_path:
-                console.print(f"  📖 [dim]Reading: {selected_path}[/dim]")
+                console.print(f"  [READ] [dim]Reading: {selected_path}[/dim]")
                 context = code_investigator.build_investigation_context(selected_path)
                 all_contexts.append(context)
                 
@@ -528,7 +528,7 @@ def handle_investigation_phase(session, agent_response=None):
                 
                 file_descriptions.append(f"{fname} (auto-resolved -> {selected_path})")
                 file_count += 1
-                console.print(f"  ✅ [green]File '{fname}' loaded successfully[/green]")
+                console.print(f"  [OK] [green]File '{fname}' loaded successfully[/green]")
 
     # ── Phase 2: Ask if user wants to provide more files or manual inputs ──
     prompt_manual = True
@@ -540,7 +540,7 @@ def handle_investigation_phase(session, agent_response=None):
         
         while True:
             label = "Primary" if file_count == 0 else "Additional"
-            file_input = session.prompt(_HTML(f"\n<ansicyan><b>📄 {label} file/directory path to investigate: </b></ansicyan>"))
+            file_input = session.prompt(_HTML(f"\n<ansicyan><b>[FILE] {label} file/directory path to investigate: </b></ansicyan>"))
             file_input = file_input.strip()
             
             if not file_input:
@@ -555,7 +555,7 @@ def handle_investigation_phase(session, agent_response=None):
             abs_path = os.path.abspath(os.path.expanduser(file_path))
             
             if os.path.isdir(abs_path):
-                console.print(f"  📁 [green]Added directory '{file_path}' to investigation search roots.[/green]")
+                console.print(f"  [DIR] [green]Added directory '{file_path}' to investigation search roots.[/green]")
                 _extra_search_roots.add(abs_path)
                 
                 # Check if we can now find any pending requested files in this new directory
@@ -569,9 +569,9 @@ def handle_investigation_phase(session, agent_response=None):
                             selected_path = None
                             if len(matches) == 1:
                                 selected_path = matches[0]
-                                console.print(f"  ✅ [green]Found match for '{fname}' in new directory:[/green] [dim]{selected_path}[/dim]")
+                                console.print(f"  [OK] [green]Found match for '{fname}' in new directory:[/green] [dim]{selected_path}[/dim]")
                             else:
-                                console.print(f"\n  [bold yellow]⚠️ Multiple matches found for '{fname}' in new directory:[/bold yellow]")
+                                console.print(f"\n  [bold yellow][!] Multiple matches found for '{fname}' in new directory:[/bold yellow]")
                                 for idx, path in enumerate(matches, 1):
                                     console.print(f"        [{idx}] {path}")
                                 choices = [str(i) for i in range(1, len(matches) + 1)]
@@ -579,7 +579,7 @@ def handle_investigation_phase(session, agent_response=None):
                                 selected_path = matches[int(choice) - 1]
                                 
                             if selected_path:
-                                console.print(f"  📖 [dim]Reading: {selected_path}[/dim]")
+                                console.print(f"  [READ] [dim]Reading: {selected_path}[/dim]")
                                 context = code_investigator.build_investigation_context(selected_path)
                                 all_contexts.append(context)
                                 
@@ -589,15 +589,15 @@ def handle_investigation_phase(session, agent_response=None):
                                 
                                 file_descriptions.append(f"{fname} (found in {file_path} -> {selected_path})")
                                 file_count += 1
-                                console.print(f"  ✅ [green]File '{fname}' loaded successfully[/green]")
+                                console.print(f"  [OK] [green]File '{fname}' loaded successfully[/green]")
             elif not os.path.isfile(abs_path):
                 console.print(f"[bold yellow]Warning: File or Directory '{file_path}' not found. Skipping.[/bold yellow]")
             else:
                 # Get optional method/code hint
-                method_hint = session.prompt(_HTML("\n<ansicyan><b>🔍 Starting method/code (optional, press Enter to skip): </b></ansicyan>"))
+                method_hint = session.prompt(_HTML("\n<ansicyan><b>[FIND] Starting method/code (optional, press Enter to skip): </b></ansicyan>"))
                 method_hint = method_hint.strip() if method_hint else None
                 
-                console.print(f"  📖 [dim]Reading: {abs_path}[/dim]")
+                console.print(f"  [READ] [dim]Reading: {abs_path}[/dim]")
                 context = code_investigator.build_investigation_context(file_path, method_hint)
                 all_contexts.append(context)
                 
@@ -610,7 +610,7 @@ def handle_investigation_phase(session, agent_response=None):
                     desc += f" (method: {method_hint})"
                 file_descriptions.append(desc)
                 file_count += 1
-                console.print(f"  ✅ [green]File {file_count} loaded[/green]")
+                console.print(f"  [OK] [green]File {file_count} loaded[/green]")
             
             # Ask if there are more files
             add_more = Confirm.ask("\nDo you have another file or directory to investigate?", default=False)
@@ -627,7 +627,7 @@ def handle_investigation_phase(session, agent_response=None):
     user_text += "\n" + "\n\n".join(all_contexts)
     
     total_chars = sum(len(c) for c in all_contexts)
-    console.print(f"\n  📋 [green]Investigation context prepared: {file_count} file(s), {total_chars} chars total[/green]")
+    console.print(f"\n  [INFO] [green]Investigation context prepared: {file_count} file(s), {total_chars} chars total[/green]")
     
     return user_text
 
@@ -695,7 +695,7 @@ def _run_auto_investigation(agent, last_response):
         if not unique_requests:
             return last_response
         
-        console.print(f"\n[bold cyan]🔎 Auto-Investigation Round {round_num}[/bold cyan]")
+        console.print(f"\n[bold cyan][SEARCH] Auto-Investigation Round {round_num}[/bold cyan]")
         console.print(f"[dim]The agent needs {len(unique_requests)} more file(s):[/dim]")
         for fname in unique_requests:
             console.print(f"  [dim]• {fname}[/dim]")
@@ -707,7 +707,7 @@ def _run_auto_investigation(agent, last_response):
         for fname in unique_requests:
             found_path = code_investigator.find_file_in_project(fname, list(search_roots))
             if found_path:
-                console.print(f"  ✅ [green]Found: {found_path}[/green]")
+                console.print(f"  [OK] [green]Found: {found_path}[/green]")
                 context = code_investigator.build_investigation_context(found_path)
                 found_contexts.append(context)
                 # Track for Phase 4 auto-resolution
@@ -715,7 +715,7 @@ def _run_auto_investigation(agent, last_response):
                 # Add this file's directory to search roots for future rounds
                 search_roots.add(os.path.dirname(found_path))
             else:
-                console.print(f"  ⚠️  [yellow]Not found: {fname}[/yellow]")
+                console.print(f"  [!]  [yellow]Not found: {fname}[/yellow]")
                 not_found.append(fname)
         
         if not found_contexts:
@@ -724,9 +724,9 @@ def _run_auto_investigation(agent, last_response):
             for fname in not_found:
                 not_found_msg += f"  - {fname}\n"
             not_found_msg += "Please continue your investigation with the files already provided, or ask the Architect for help locating these files."
-            with console.status("[bold green]🤖 LV Agent continuing investigation...[/bold green]", spinner="dots"):
+            with console.status("[bold green][AGENT] LV Agent continuing investigation...[/bold green]", spinner="dots"):
                 last_response, stats = agent.send_message(not_found_msg)
-            console.print(Panel(Markdown(last_response), title=f"🤖 LV Agent — Investigation (Round {round_num})", border_style="yellow"))
+            console.print(Panel(Markdown(last_response), title=f"[AGENT] LV Agent — Investigation (Round {round_num})", border_style="yellow"))
             _display_token_stats(agent, stats)
             continue
         
@@ -737,13 +737,13 @@ def _run_auto_investigation(agent, last_response):
             auto_msg += f"Could NOT find: {', '.join(not_found)}\n"
         auto_msg += "\n" + "\n\n".join(found_contexts)
         
-        with console.status("[bold green]🤖 LV Agent continuing investigation...[/bold green]", spinner="dots"):
+        with console.status("[bold green][AGENT] LV Agent continuing investigation...[/bold green]", spinner="dots"):
             last_response, stats = agent.send_message(auto_msg)
-        console.print(Panel(Markdown(last_response), title=f"🤖 LV Agent — Investigation (Round {round_num})", border_style="yellow"))
+        console.print(Panel(Markdown(last_response), title=f"[AGENT] LV Agent — Investigation (Round {round_num})", border_style="yellow"))
         _display_token_stats(agent, stats)
     
     if _parse_investigate_markers(last_response):
-        console.print(f"[bold yellow]⚠️  Investigation round limit ({MAX_AUTO_INVESTIGATION_ROUNDS}) reached. The agent may continue with partial context.[/bold yellow]")
+        console.print(f"[bold yellow][!]  Investigation round limit ({MAX_AUTO_INVESTIGATION_ROUNDS}) reached. The agent may continue with partial context.[/bold yellow]")
         
     return last_response
 
@@ -828,7 +828,7 @@ def process_and_save_files(response, agent, session):
             choice = Confirm.ask(prompt_msg)
             
             if not choice:
-                console.print("⏭️  [dim]Skipped.[/dim]")
+                console.print("[SKIP]  [dim]Skipped.[/dim]")
                 continue
             
             entry['filename'] = filename
@@ -846,7 +846,7 @@ def process_and_save_files(response, agent, session):
             choice = Confirm.ask("Do you want to save this code block?")
         
         if not choice:
-            console.print("⏭️  [dim]Skipped.[/dim]")
+            console.print("[SKIP]  [dim]Skipped.[/dim]")
             continue
         
         # Get the target path from user
@@ -912,7 +912,7 @@ def process_and_save_files(response, agent, session):
     batch_action = None  # None means new-only, 'm', 'o', 's', or 'p'
     
     if existing_entries:
-        console.print(f"⚠️  [bold yellow]{len(existing_entries)} of {len(resolved_entries)} file(s) already exist.[/bold yellow]")
+        console.print(f"[!]  [bold yellow]{len(existing_entries)} of {len(resolved_entries)} file(s) already exist.[/bold yellow]")
         
         if len(existing_entries) == 1:
             # Single existing file — go directly to per-file mode
@@ -950,7 +950,7 @@ def process_and_save_files(response, agent, session):
             action = Prompt.ask(f"  {filename}: (m)erge, (o)verwrite, or (s)kip?", choices=['m', 'o', 's'])
         
         if action == 's':
-            console.print(f"  ⏭️  [dim]Skipped: {filename}[/dim]")
+            console.print(f"  [SKIP]  [dim]Skipped: {filename}[/dim]")
             continue
         
         if action == 'o':
@@ -979,7 +979,7 @@ def _perform_merge(agent, entry, merge_max_lines):
     proposed_content = entry['code']
     
     if existing_content is None:
-        console.print(f"  ⚠️  [bold yellow]Could not read existing file: {filename}. Falling back to overwrite.[/bold yellow]")
+        console.print(f"  [!]  [bold yellow]Could not read existing file: {filename}. Falling back to overwrite.[/bold yellow]")
         file_merger.create_backup(abs_path)
         _write_new_file(abs_path, proposed_content, filename)
         return
@@ -987,24 +987,24 @@ def _perform_merge(agent, entry, merge_max_lines):
     # Check file size against threshold
     line_count = len(existing_content.splitlines())
     if line_count > merge_max_lines:
-        console.print(f"  ⚠️  [bold yellow]File has {line_count} lines (limit: {merge_max_lines}). LLM merge may consume significant tokens.[/bold yellow]")
+        console.print(f"  [!]  [bold yellow]File has {line_count} lines (limit: {merge_max_lines}). LLM merge may consume significant tokens.[/bold yellow]")
         proceed = Confirm.ask("  Proceed with merge?")
         if not proceed:
-            console.print(f"  ⏭️  [dim]Skipped merge for: {filename}[/dim]")
+            console.print(f"  [SKIP]  [dim]Skipped merge for: {filename}[/dim]")
             return
     
     # Call LLM for merge
-    console.print(f"  🔄 Merging {filename}...")
+    console.print(f"  [MERGE] Merging {filename}...")
     try:
         merged_content = file_merger.merge_files(agent, existing_content, proposed_content, filename)
     except Exception as e:
-        console.print(f"  ❌ [bold red]Merge failed: {e}[/bold red]")
+        console.print(f"  [ERROR] [bold red]Merge failed: {e}[/bold red]")
         fallback = Prompt.ask("  Do you want to (o)verwrite or (s)kip?", choices=['o', 's'])
         if fallback == 'o':
             file_merger.create_backup(abs_path)
             _write_new_file(abs_path, proposed_content, filename)
         else:
-            console.print(f"  ⏭️  [dim]Skipped: {filename}[/dim]")
+            console.print(f"  [SKIP]  [dim]Skipped: {filename}[/dim]")
         return
     
     # Show diff
@@ -1016,7 +1016,7 @@ def _perform_merge(agent, entry, merge_max_lines):
         file_merger.create_backup(abs_path)
         _write_new_file(abs_path, merged_content, filename)
     else:
-        console.print(f"  ⏭️  [dim]Merge discarded for: {filename}[/dim]")
+        console.print(f"  [SKIP]  [dim]Merge discarded for: {filename}[/dim]")
 
 
 def _write_new_file(abs_path, content, filename):
@@ -1031,9 +1031,9 @@ def _write_new_file(abs_path, content, filename):
         os.makedirs(os.path.dirname(abs_path) or '.', exist_ok=True)
         with open(abs_path, 'w', encoding='utf-8') as f:
             f.write(content)
-        console.print(f"  ✅ [green]Saved to: {abs_path}[/green]")
+        console.print(f"  [OK] [green]Saved to: {abs_path}[/green]")
     except Exception as e:
-        console.print(f"  ❌ [bold red]Error saving {filename}: {e}[/bold red]")
+        console.print(f"  [ERROR] [bold red]Error saving {filename}: {e}[/bold red]")
 
 
 def _display_token_stats(agent, turn_stats):
@@ -1052,7 +1052,7 @@ def _display_token_stats(agent, turn_stats):
     total_k = total_session / 1000
     turns = agent.session_stats['turns']
     console.print(
-        f"[dim]  📊 Turn: ↑{prompt_k:.1f}K ↓{comp_k:.1f}K tokens | "
+        f"[dim]  [STATS] Turn: ↑{prompt_k:.1f}K ↓{comp_k:.1f}K tokens | "
         f"Session: {total_k:.1f}K total ({turns} turns)[/dim]"
     )
 
@@ -1068,7 +1068,7 @@ def _display_session_summary(agent):
     if total > 0:
         turns = agent.session_stats['turns']
         console.print(
-            f"\n[bold cyan]📊 Session Summary[/bold cyan]: "
+            f"\n[bold cyan][STATS] Session Summary[/bold cyan]: "
             f"{total/1000:.1f}K tokens across {turns} turns "
             f"(↑{agent.session_stats['total_prompt']/1000:.1f}K prompt, "
             f"↓{agent.session_stats['total_completion']/1000:.1f}K completion)"
@@ -1097,7 +1097,7 @@ def _handle_preferences_command(agent, user_input):
             console.print("\n[dim]No architect preferences stored yet. Preferences are learned automatically from your feedback during Phase 2 and Phase 3.[/dim]\n")
             return
 
-        console.print(f"\n[bold cyan]🧠 Architect Preferences ({len(prefs)}/{pref_mgr.max_preferences})[/bold cyan]\n")
+        console.print(f"\n[bold cyan][BRAIN] Architect Preferences ({len(prefs)}/{pref_mgr.max_preferences})[/bold cyan]\n")
         for i, pref in enumerate(prefs, 1):
             category = pref.get("category", "general").upper().replace("_", " ")
             rule = pref.get("rule", "")
@@ -1115,7 +1115,7 @@ def _handle_preferences_command(agent, user_input):
             index = int(parts[2])
             removed = pref_mgr.remove_preference(index)
             if removed:
-                console.print(f"\n[green]✅ Removed preference {index}: {removed.get('rule', '')}[/green]\n")
+                console.print(f"\n[green][OK] Removed preference {index}: {removed.get('rule', '')}[/green]\n")
             else:
                 console.print(f"\n[bold red]Invalid index: {index}[/bold red]\n")
         except ValueError:
@@ -1130,7 +1130,7 @@ def _handle_preferences_command(agent, user_input):
         confirm = Confirm.ask(f"Clear all {count} preferences?")
         if confirm:
             pref_mgr.clear_all()
-            console.print("\n[green]✅ All preferences cleared.[/green]\n")
+            console.print("\n[green][OK] All preferences cleared.[/green]\n")
         else:
             console.print("\n[dim]Cancelled.[/dim]\n")
         return
@@ -1163,7 +1163,7 @@ def _configure_database(env_path, prefix, label):
         prefix: Environment variable prefix (e.g., 'DB1', 'DB2').
         label: Human-readable label (e.g., 'Primary', 'Secondary').
     """
-    console.print(f"\n[bold cyan]📦 {label} Database ({prefix})[/bold cyan]")
+    console.print(f"\n[bold cyan][PKG] {label} Database ({prefix})[/bold cyan]")
 
     db_type = Prompt.ask(
         f"  Database type",
@@ -1198,12 +1198,12 @@ def _configure_database(env_path, prefix, label):
             f.write(f"{prefix}_NAME={db_name}\n")
             f.write(f"{prefix}_USER={db_user}\n")
             f.write(f"{prefix}_PASSWORD={db_password}\n")
-        console.print(f"  [green]✅ {label} database configuration saved.[/green]")
+        console.print(f"  [green][OK] {label} database configuration saved.[/green]")
     except Exception as e:
         console.print(f"  [bold yellow]Warning: Could not save to {env_path}: {e}[/bold yellow]")
 
     # Test connection
-    console.print(f"  🔄 Testing connection...")
+    console.print(f"  [MERGE] Testing connection...")
     connector = DatabaseConnector(prefix)
     result = connector.test_connection()
     console.print(f"  {result}")
@@ -1242,7 +1242,7 @@ def _handle_db_command(agent, user_input):
         return
 
     if subcommand == "test":
-        console.print("\n[bold cyan]🔄 Testing database connections...[/bold cyan]")
+        console.print("\n[bold cyan][MERGE] Testing database connections...[/bold cyan]")
         results = db_mgr.test_connections()
         console.print(f"\n{results}\n")
         return
@@ -1254,7 +1254,7 @@ def _handle_db_command(agent, user_input):
 
     if subcommand == "config":
         env_path = os.path.join(os.getcwd(), '.lvcopilotenv')
-        console.print("\n[bold cyan]📦 Database Reconfiguration[/bold cyan]")
+        console.print("\n[bold cyan][PKG] Database Reconfiguration[/bold cyan]")
         _configure_database(env_path, "DB1", "Primary")
         add_second = Confirm.ask("\nConfigure a second database?", default=False)
         if add_second:
@@ -1263,7 +1263,7 @@ def _handle_db_command(agent, user_input):
         agent.db_manager.close_all()
         from .db_connector import DatabaseManager
         agent.db_manager = DatabaseManager()
-        console.print("\n[green]✅ Database configuration updated.[/green]\n")
+        console.print("\n[green][OK] Database configuration updated.[/green]\n")
         return
 
     console.print(f"\n[bold yellow]Unknown /db subcommand: {subcommand}[/bold yellow]")
@@ -1286,13 +1286,13 @@ def main():
         console.print(f"[bold red]Failed to start agent. Error:[/bold red] {e}")
         sys.exit(1)
         
-    console.print(Panel(Markdown(initial_greeting), title="🤖 LV Agent", border_style="blue"))
+    console.print(Panel(Markdown(initial_greeting), title="[AGENT] LV Agent", border_style="blue"))
     _display_token_stats(agent, initial_stats)
     
     # Show loaded architect preferences count
     pref_count = len(agent.preference_manager.list_preferences())
     if pref_count > 0:
-        console.print(f"[dim]🧠 {pref_count} architect preference(s) loaded from previous sessions[/dim]")
+        console.print(f"[dim][BRAIN] {pref_count} architect preference(s) loaded from previous sessions[/dim]")
     
     # Show database status
     if agent.db_manager.has_any_configured():
@@ -1361,7 +1361,7 @@ def main():
     
     while True:
         try:
-            user_input = session.prompt(HTML("\n<ansicyan><b>👤 Architect (type 'exit' to quit): </b></ansicyan>"))
+            user_input = session.prompt(HTML("\n<ansicyan><b>[USER] Architect (type 'exit' to quit): </b></ansicyan>"))
             if user_input.lower() in ['exit', 'quit']:
                 _display_session_summary(agent)
                 console.print("[bold green]Goodbye![/bold green]")
@@ -1369,17 +1369,17 @@ def main():
                 
             if user_input.strip().lower() in ['clear', '/clear']:
                 console.clear()
-                console.print("\n[bold green]🔄 Session cleared successfully! Starting a fresh session...[/bold green]")
+                console.print("\n[bold green][MERGE] Session cleared successfully! Starting a fresh session...[/bold green]")
                 pref_count = len(agent.preference_manager.list_preferences())
                 if pref_count > 0:
-                    console.print(f"[dim]💡 {pref_count} architect preference(s) retained (use /preferences to manage)[/dim]")
+                    console.print(f"[dim][TIP] {pref_count} architect preference(s) retained (use /preferences to manage)[/dim]")
                 console.print()
                 _investigated_files.clear()
                 current_mode = 'new'
                 agent.reset()
                 
                 initial_greeting, initial_stats = agent.start()
-                console.print(Panel(Markdown(initial_greeting), title="🤖 LV Agent", border_style="blue"))
+                console.print(Panel(Markdown(initial_greeting), title="[AGENT] LV Agent", border_style="blue"))
                 _display_token_stats(agent, initial_stats)
                 continue
             
@@ -1394,7 +1394,7 @@ def main():
             if not user_input.strip():
                 continue
                 
-            with console.status("[bold green]🤖 LV Agent is thinking...[/bold green]", spinner="dots"):
+            with console.status("[bold green][AGENT] LV Agent is thinking...[/bold green]", spinner="dots"):
                 processed_input = process_at_references(user_input)
                 
                 # In Modify/Debug mode, track any @referenced files so Phase 4
@@ -1450,7 +1450,7 @@ def main():
                                         )
                             
                             if full_file_contexts:
-                                console.print("\n[bold magenta]📦 Plan approved — injecting full client file content for Phase 3 code generation...[/bold magenta]")
+                                console.print("\n[bold magenta][PKG] Plan approved — injecting full client file content for Phase 3 code generation...[/bold magenta]")
                                 processed_input += "\n\n[System Context — Full Client Source Files for Phase 3 Code Generation]" + "".join(full_file_contexts)
                 
                 # ── Error Log Detection & Auto-Investigation ──
@@ -1481,11 +1481,11 @@ def main():
                 )
                 
                 if error_result['detected']:
-                    console.print("\n[bold magenta]🔍 Log pattern detected — auto-investigating source files...[/bold magenta]")
+                    console.print("\n[bold magenta][FIND] Log pattern detected — auto-investigating source files...[/bold magenta]")
                     # Register client files for Phase 4 auto-resolution
                     for basename, abs_path in error_result['client_files'].items():
                         _investigated_files[basename] = abs_path
-                        console.print(f"  📄 [green]Found client file: {abs_path}[/green]")
+                        console.print(f"  [FILE] [green]Found client file: {abs_path}[/green]")
                     # Append the investigation context to the user input
                     processed_input += error_result['context']
 
@@ -1498,13 +1498,13 @@ def main():
                                 schema = agent.db_manager.get_connector(db_key).describe_table(table)
                                 if schema and 'Error' not in schema and 'not found or could not be described' not in schema:
                                     processed_input += f"\n[Auto-Injected Schema for {table}]\n{schema}\n"
-                                    console.print(f"  🗃️  [green]Schema injected: {table}[/green]")
+                                    console.print(f"  [DB]  [green]Schema injected: {table}[/green]")
                             except Exception:
                                 pass
                 
                 response, turn_stats = agent.send_message(processed_input)
                 
-            console.print(Panel(Markdown(response), title="🤖 LV Agent", border_style="blue"))
+            console.print(Panel(Markdown(response), title="[AGENT] LV Agent", border_style="blue"))
             _display_token_stats(agent, turn_stats)
             
             # Display any background preference extraction notifications
@@ -1514,10 +1514,10 @@ def main():
             detected_mode = detect_agent_mode(response)
             if detected_mode == 'modify':
                 current_mode = 'modify'
-                console.print("[dim]📋 Mode: Modify — The agent will investigate existing code before proposing changes.[/dim]")
+                console.print("[dim][INFO] Mode: Modify — The agent will investigate existing code before proposing changes.[/dim]")
             elif detected_mode == 'debug':
                 current_mode = 'debug'
-                console.print("[dim]🐛 Mode: Debug — The agent is diagnosing the error and will propose a fix.[/dim]")
+                console.print("[dim][DEBUG] Mode: Debug — The agent is diagnosing the error and will propose a fix.[/dim]")
             elif re.search(r'\[Phase:\s*1\]', response) and not re.search(r'\[Phase:\s*1\.5\]', response):
                 # Reset mode when agent returns to Phase 1 (new cycle)
                 current_mode = 'new'
@@ -1528,9 +1528,9 @@ def main():
             if detect_investigation_phase(response):
                 investigation_input = handle_investigation_phase(session, response)
                 if investigation_input:
-                    with console.status("[bold green]🤖 LV Agent is investigating...[/bold green]", spinner="dots"):
+                    with console.status("[bold green][AGENT] LV Agent is investigating...[/bold green]", spinner="dots"):
                         investigation_response, inv_stats = agent.send_message(investigation_input)
-                    console.print(Panel(Markdown(investigation_response), title="🤖 LV Agent — Investigation", border_style="yellow"))
+                    console.print(Panel(Markdown(investigation_response), title="[AGENT] LV Agent — Investigation", border_style="yellow"))
                     _display_token_stats(agent, inv_stats)
                     
                     # Auto-investigation loop: detect [Investigate: filename] requests
