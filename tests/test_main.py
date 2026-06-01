@@ -107,6 +107,33 @@ public class MyAction {}
             mock_detect.assert_called_with(expected_abs_path)
             mock_confirm_ask.assert_called_once_with("Do you want to save the modified file?")
 
+    @patch('lvcopilot.main.Confirm.ask')
+    @patch('lvcopilot.main.file_merger.detect_existing_file')
+    @patch('lvcopilot.main._resolve_investigated_file')
+    def test_process_and_save_files_prefer_workspace(self, mock_resolve, mock_detect, mock_confirm_ask):
+        mock_resolve.return_value = '/Users/ramise_mondal/LV_Dummy_Proj_Imp/Java/sapphire/action/ReagentExpiryNotification.java'
+        mock_detect.return_value = (False, None)
+        mock_confirm_ask.return_value = False
+        
+        agent_mock = MagicMock()
+        session_mock = MagicMock()
+        
+        # Tracked file in _investigated_files is outside workspace in PRODUCT_SRC_DIR.
+        # But agent explicitly suggested src/sapphire/action/ReagentExpiryNotification.java inside workspace.
+        # We must prefer the workspace path!
+        response = """
+[Phase: 4] [Mode: New]
+File: src/sapphire/action/ReagentExpiryNotification.java
+```java
+public class ReagentExpiryNotification {}
+```
+"""
+        
+        main.process_and_save_files(response, agent_mock, session_mock)
+        
+        expected_workspace_path = os.path.abspath(os.path.expanduser("src/sapphire/action/ReagentExpiryNotification.java"))
+        mock_detect.assert_called_with(expected_workspace_path)
+
 
 if __name__ == '__main__':
     unittest.main()

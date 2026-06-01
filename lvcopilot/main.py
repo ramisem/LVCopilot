@@ -809,13 +809,14 @@ def process_and_save_files(response, agent, session):
         lang = entry['lang']
         agent_path = entry.get('agent_path')
         
-        # Check if this file was previously investigated (Modify/Debug mode)
-        # Use smart resolution: exact, case-insensitive, FQCN, and project search
-        resolved_path = _resolve_investigated_file(filename) if filename else None
-        
-        # If not resolved via investigated files, but the agent provided a path containing directory separators
-        if not resolved_path and agent_path and ('/' in agent_path or '\\' in agent_path):
+        # 1. If the agent provided a path containing directory separators, trust it and resolve it relative to the workspace CWD
+        resolved_path = None
+        if agent_path and ('/' in agent_path or '\\' in agent_path):
             resolved_path = os.path.abspath(os.path.expanduser(agent_path))
+            
+        # 2. Otherwise, check if this file was previously investigated (Modify/Debug mode) or perform a project-wide search
+        if not resolved_path and filename:
+            resolved_path = _resolve_investigated_file(filename)
         
         if resolved_path:
             abs_path = resolved_path
