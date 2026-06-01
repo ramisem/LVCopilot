@@ -526,7 +526,7 @@ def handle_investigation_phase(session, agent_response=None):
                 _investigated_files[basename] = selected_path
                 _investigated_files[fname] = selected_path
                 
-                file_descriptions.append(f"{fname} (auto-resolved → {selected_path})")
+                file_descriptions.append(f"{fname} (auto-resolved -> {selected_path})")
                 file_count += 1
                 console.print(f"  ✅ [green]File '{fname}' loaded successfully[/green]")
 
@@ -587,7 +587,7 @@ def handle_investigation_phase(session, agent_response=None):
                                 _investigated_files[basename] = selected_path
                                 _investigated_files[fname] = selected_path
                                 
-                                file_descriptions.append(f"{fname} (found in {file_path} → {selected_path})")
+                                file_descriptions.append(f"{fname} (found in {file_path} -> {selected_path})")
                                 file_count += 1
                                 console.print(f"  ✅ [green]File '{fname}' loaded successfully[/green]")
             elif not os.path.isfile(abs_path):
@@ -824,7 +824,7 @@ def process_and_save_files(response, agent, session):
             label = "Modified file" if exists else "New file"
             prompt_msg = "Do you want to save the modified file?" if exists else "Do you want to save this new file?"
             
-            console.print(f"\n[bold blue][LVCopilot][/bold blue] {label}: [cyan]{filename}[/cyan] → {abs_path}")
+            console.print(f"\n[bold blue][LVCopilot][/bold blue] {label}: [cyan]{filename}[/cyan] -> {abs_path}")
             choice = Confirm.ask(prompt_msg)
             
             if not choice:
@@ -905,7 +905,7 @@ def process_and_save_files(response, agent, session):
     console.print("\n[bold cyan]--- File Summary ---[/bold cyan]")
     for entry in resolved_entries:
         status = "[yellow][UPDATE][/yellow]" if entry['exists'] else "[green][NEW]   [/green]"
-        console.print(f"  {status} {entry['filename']:<30} → {entry['abs_path']}")
+        console.print(f"  {status} {entry['filename']:<30} -> {entry['abs_path']}")
     console.print("")
     
     # ── Phase 4: Determine batch action for existing files ──
