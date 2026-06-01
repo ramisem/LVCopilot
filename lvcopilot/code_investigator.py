@@ -39,6 +39,36 @@ def find_file_in_project(filename, search_roots):
     return None
 
 
+def find_all_files_in_project(filename, search_roots):
+    """Search for all matching files by name within project directory trees.
+
+    Walks the directory trees starting from each search root, skipping
+    common non-project directories. Returns a list of absolute paths of all matches.
+
+    Args:
+        filename: The basename of the file to find (e.g., 'DataHelper.java').
+        search_roots: List of directory paths to search from.
+
+    Returns:
+        list[str]: Absolute paths to all found files.
+    """
+    target = filename.strip()
+    matches = []
+    seen = set()
+    for root_dir in search_roots:
+        if not os.path.isdir(root_dir):
+            continue
+        for dirpath, dirnames, filenames in os.walk(root_dir):
+            # Skip non-project directories in-place
+            dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+            if target in filenames:
+                full_path = os.path.abspath(os.path.join(dirpath, target))
+                if full_path not in seen:
+                    matches.append(full_path)
+                    seen.add(full_path)
+    return matches
+
+
 def read_file_content(filepath):
     """Read a file and return its content with line numbers for investigation.
 

@@ -25,6 +25,9 @@ console = Console()
 # Maps basename -> absolute path so Phase 4 can auto-resolve without re-asking
 _investigated_files = {}
 
+# Track extra search directories provided during interactive phase
+_extra_search_roots = set()
+
 
 def _resolve_investigated_file(filename):
     """Smart path resolution for Phase 4 file saving.
@@ -84,6 +87,13 @@ def _resolve_investigated_file(filename):
 
     # 4. Project-wide search fallback
     search_roots = [os.getcwd()]
+    product_src_dir = os.environ.get("PRODUCT_SRC_DIR", "").strip()
+    if product_src_dir and os.path.isdir(product_src_dir):
+        search_roots.append(product_src_dir)
+    for root in _extra_search_roots:
+        if root not in search_roots:
+            search_roots.append(root)
+
     for abs_path in _investigated_files.values():
         parent = os.path.dirname(abs_path)
         if parent not in search_roots:
@@ -437,14 +447,17 @@ def detect_investigation_phase(response):
     return bool(re.search(r'\[Phase:\s*1\.5\]', response, re.IGNORECASE))
 
 
-def handle_investigation_phase(session):
-    """Prompt the architect for investigation starting points (supports multiple files).
+def handle_investigation_phase(session, agent_response=None):
+    """Prompt the architect or auto-resolve investigation starting points (supports directories).
     
-    Asks for one or more file paths and optionally a method/code hint per file,
-    then builds a combined investigation context using code_investigator.
+    Checks if agent requested files using [Investigate: filename], tries to auto-resolve them
+    within project search roots + PRODUCT_SRC_DIR + extra search roots. Prompts with a numbered
+    selection menu if multiple matches are found. If files are not resolved or manual inputs
+    are wanted, asks for file/directory paths.
     
     Args:
         session: The PromptSession for input.
+        agent_response: The agent's raw response to parse for requested files.
     
     Returns:
         str: The user's text combined with investigation context for all files,
@@ -452,7 +465,6 @@ def handle_investigation_phase(session):
     """
     console.print("\n[bold cyan]📂 Investigation Mode[/bold cyan]")
     console.print("[dim]The agent needs to understand the existing code before proposing changes.[/dim]")
-    console.print("[dim]Provide the file path(s) to investigate (you can use @path for autocomplete).[/dim]\n")
     
     from prompt_toolkit.formatted_text import HTML as _HTML
     
@@ -460,50 +472,150 @@ def handle_investigation_phase(session):
     file_descriptions = []
     file_count = 0
     
-    while True:
-        label = "Primary" if file_count == 0 else "Additional"
-        file_input = session.prompt(_HTML(f"\n<ansicyan><b>📄 {label} file path to investigate: </b></ansicyan>"))
-        file_input = file_input.strip()
+    # ── Phase 1: Try auto-resolution of [Investigate: ...] markers from agent_response ──
+    requested_files = []
+    if agent_response:
+        requested_files = _parse_investigate_markers(agent_response)
         
-        if not file_input:
-            if file_count == 0:
-                console.print("[bold yellow]No file provided. The agent will continue without investigation context.[/bold yellow]")
-                return ""
+    if requested_files:
+        console.print("\n[bold cyan]🔎 Auto-Resolving Agent's Investigation Requests...[/bold cyan]")
+        
+        # Build search roots
+        search_roots = set()
+        search_roots.add(os.getcwd())
+        product_src_dir = os.environ.get("PRODUCT_SRC_DIR", "").strip()
+        if product_src_dir and os.path.isdir(product_src_dir):
+            search_roots.add(product_src_dir)
+        for root in _extra_search_roots:
+            search_roots.add(root)
+            
+        for fname in requested_files:
+            fname = fname.strip()
+            # Search using find_all_files_in_project
+            matches = code_investigator.find_all_files_in_project(fname, list(search_roots))
+            
+            if not matches:
+                # If fname has directories in it, or is a relative path, see if it is a real file directly on disk
+                candidate_path = os.path.abspath(os.path.expanduser(fname))
+                if os.path.isfile(candidate_path):
+                    matches = [candidate_path]
+            
+            if not matches:
+                console.print(f"  ❌ [yellow]Could not find '{fname}' in project/product search roots.[/yellow]")
+                continue
+                
+            selected_path = None
+            if len(matches) == 1:
+                selected_path = matches[0]
+                console.print(f"  ✅ [green]Found exactly one match for '{fname}':[/green] [dim]{selected_path}[/dim]")
             else:
-                # No more files — done
+                # Multiple matches! Present interactive selection menu
+                console.print(f"\n  [bold yellow]⚠️ Multiple matches found for '{fname}':[/bold yellow]")
+                for idx, path in enumerate(matches, 1):
+                    console.print(f"    [{idx}] {path}")
+                choices = [str(i) for i in range(1, len(matches) + 1)]
+                choice = Prompt.ask("  Select which file to investigate", choices=choices, default="1")
+                selected_path = matches[int(choice) - 1]
+                
+            if selected_path:
+                console.print(f"  📖 [dim]Reading: {selected_path}[/dim]")
+                context = code_investigator.build_investigation_context(selected_path)
+                all_contexts.append(context)
+                
+                basename = os.path.basename(selected_path)
+                _investigated_files[basename] = selected_path
+                _investigated_files[fname] = selected_path
+                
+                file_descriptions.append(f"{fname} (auto-resolved → {selected_path})")
+                file_count += 1
+                console.print(f"  ✅ [green]File '{fname}' loaded successfully[/green]")
+
+    # ── Phase 2: Ask if user wants to provide more files or manual inputs ──
+    prompt_manual = True
+    if file_count > 0:
+        prompt_manual = Confirm.ask("\nDo you want to provide any additional file/directory paths to investigate?", default=False)
+        
+    if prompt_manual:
+        console.print("[dim]Provide file/directory path(s) to investigate (you can use @path for autocomplete).[/dim]\n")
+        
+        while True:
+            label = "Primary" if file_count == 0 else "Additional"
+            file_input = session.prompt(_HTML(f"\n<ansicyan><b>📄 {label} file/directory path to investigate: </b></ansicyan>"))
+            file_input = file_input.strip()
+            
+            if not file_input:
+                if file_count == 0:
+                    console.print("[bold yellow]No file/directory provided. The agent will continue without investigation context.[/bold yellow]")
+                    return ""
+                else:
+                    break
+            
+            # Extract the file path — handle @prefix if used
+            file_path = file_input.lstrip('@').strip()
+            abs_path = os.path.abspath(os.path.expanduser(file_path))
+            
+            if os.path.isdir(abs_path):
+                console.print(f"  📁 [green]Added directory '{file_path}' to investigation search roots.[/green]")
+                _extra_search_roots.add(abs_path)
+                
+                # Check if we can now find any pending requested files in this new directory
+                if requested_files:
+                    for fname in requested_files:
+                        if fname in _investigated_files:
+                            continue
+                        # Search inside this new directory
+                        matches = code_investigator.find_all_files_in_project(fname, [abs_path])
+                        if matches:
+                            selected_path = None
+                            if len(matches) == 1:
+                                selected_path = matches[0]
+                                console.print(f"  ✅ [green]Found match for '{fname}' in new directory:[/green] [dim]{selected_path}[/dim]")
+                            else:
+                                console.print(f"\n  [bold yellow]⚠️ Multiple matches found for '{fname}' in new directory:[/bold yellow]")
+                                for idx, path in enumerate(matches, 1):
+                                    console.print(f"        [{idx}] {path}")
+                                choices = [str(i) for i in range(1, len(matches) + 1)]
+                                choice = Prompt.ask("      Select which file to investigate", choices=choices, default="1")
+                                selected_path = matches[int(choice) - 1]
+                                
+                            if selected_path:
+                                console.print(f"  📖 [dim]Reading: {selected_path}[/dim]")
+                                context = code_investigator.build_investigation_context(selected_path)
+                                all_contexts.append(context)
+                                
+                                basename = os.path.basename(selected_path)
+                                _investigated_files[basename] = selected_path
+                                _investigated_files[fname] = selected_path
+                                
+                                file_descriptions.append(f"{fname} (found in {file_path} → {selected_path})")
+                                file_count += 1
+                                console.print(f"  ✅ [green]File '{fname}' loaded successfully[/green]")
+            elif not os.path.isfile(abs_path):
+                console.print(f"[bold yellow]Warning: File or Directory '{file_path}' not found. Skipping.[/bold yellow]")
+            else:
+                # Get optional method/code hint
+                method_hint = session.prompt(_HTML("\n<ansicyan><b>🔍 Starting method/code (optional, press Enter to skip): </b></ansicyan>"))
+                method_hint = method_hint.strip() if method_hint else None
+                
+                console.print(f"  📖 [dim]Reading: {abs_path}[/dim]")
+                context = code_investigator.build_investigation_context(file_path, method_hint)
+                all_contexts.append(context)
+                
+                # Remember this file path so Phase 4 can auto-resolve it
+                basename = os.path.basename(abs_path)
+                _investigated_files[basename] = abs_path
+                
+                desc = f"{file_path}"
+                if method_hint:
+                    desc += f" (method: {method_hint})"
+                file_descriptions.append(desc)
+                file_count += 1
+                console.print(f"  ✅ [green]File {file_count} loaded[/green]")
+            
+            # Ask if there are more files
+            add_more = Confirm.ask("\nDo you have another file or directory to investigate?", default=False)
+            if not add_more:
                 break
-        
-        # Extract the file path — handle @prefix if used
-        file_path = file_input.lstrip('@').strip()
-        
-        # Get optional method/code hint
-        method_hint = session.prompt(_HTML("\n<ansicyan><b>🔍 Starting method/code (optional, press Enter to skip): </b></ansicyan>"))
-        method_hint = method_hint.strip() if method_hint else None
-        
-        # Build the investigation context for this file
-        abs_path = os.path.abspath(os.path.expanduser(file_path))
-        if not os.path.isfile(abs_path):
-            console.print(f"[bold yellow]Warning: File '{file_path}' not found. Skipping.[/bold yellow]")
-        else:
-            console.print(f"  📖 [dim]Reading: {abs_path}[/dim]")
-            context = code_investigator.build_investigation_context(file_path, method_hint)
-            all_contexts.append(context)
-            
-            # Remember this file path so Phase 4 can auto-resolve it
-            basename = os.path.basename(abs_path)
-            _investigated_files[basename] = abs_path
-            
-            desc = f"{file_path}"
-            if method_hint:
-                desc += f" (method: {method_hint})"
-            file_descriptions.append(desc)
-            file_count += 1
-            console.print(f"  ✅ [green]File {file_count} loaded[/green]")
-        
-        # Ask if there are more files
-        add_more = Confirm.ask("\nDo you have another file to investigate?", default=False)
-        if not add_more:
-            break
     
     if not all_contexts:
         return ""
@@ -550,6 +662,12 @@ def _run_auto_investigation(agent, last_response):
     # Build search roots from investigated file directories + CWD
     search_roots = set()
     search_roots.add(os.getcwd())
+    product_src_dir = os.environ.get("PRODUCT_SRC_DIR", "").strip()
+    if product_src_dir and os.path.isdir(product_src_dir):
+        search_roots.add(product_src_dir)
+    for root in _extra_search_roots:
+        search_roots.add(root)
+
     for abs_path in _investigated_files.values():
         parent = os.path.dirname(abs_path)
         search_roots.add(parent)
@@ -1391,10 +1509,11 @@ def main():
                 # Reset mode when agent returns to Phase 1 (new cycle)
                 current_mode = 'new'
                 _investigated_files.clear()
+                _extra_search_roots.clear()
             
             # Handle Phase 1.5 — Investigation Setup (Modify mode)
             if detect_investigation_phase(response):
-                investigation_input = handle_investigation_phase(session)
+                investigation_input = handle_investigation_phase(session, response)
                 if investigation_input:
                     with console.status("[bold green]🤖 LV Agent is investigating...[/bold green]", spinner="dots"):
                         investigation_response, inv_stats = agent.send_message(investigation_input)
