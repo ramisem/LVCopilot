@@ -27,15 +27,32 @@ def find_file_in_project(filename, search_roots):
     Returns:
         str or None: Absolute path to the found file, or None if not found.
     """
-    target = filename.strip()
+    target = filename.strip().replace('\\', '/').replace('/', os.sep)
+    for root_dir in search_roots:
+        if not os.path.isdir(root_dir):
+            continue
+        candidate = os.path.abspath(os.path.join(root_dir, target))
+        if os.path.isfile(candidate):
+            return candidate
+
+    basename = os.path.basename(target)
     for root_dir in search_roots:
         if not os.path.isdir(root_dir):
             continue
         for dirpath, dirnames, filenames in os.walk(root_dir):
             # Skip non-project directories in-place
             dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
-            if target in filenames:
-                return os.path.abspath(os.path.join(dirpath, target))
+            if basename in filenames:
+                full_path = os.path.abspath(os.path.join(dirpath, basename))
+                norm_full = os.path.normpath(full_path)
+                norm_target = os.path.normpath(target)
+                
+                full_parts = [p for p in norm_full.split(os.sep) if p]
+                target_parts = [p for p in norm_target.split(os.sep) if p]
+                
+                if len(full_parts) >= len(target_parts):
+                    if full_parts[-len(target_parts):] == target_parts:
+                        return norm_full
     return None
 
 
@@ -52,20 +69,37 @@ def find_all_files_in_project(filename, search_roots):
     Returns:
         list[str]: Absolute paths to all found files.
     """
-    target = filename.strip()
+    target = filename.strip().replace('\\', '/').replace('/', os.sep)
     matches = []
     seen = set()
+    for root_dir in search_roots:
+        if not os.path.isdir(root_dir):
+            continue
+        candidate = os.path.abspath(os.path.join(root_dir, target))
+        if os.path.isfile(candidate) and candidate not in seen:
+            matches.append(candidate)
+            seen.add(candidate)
+
+    basename = os.path.basename(target)
     for root_dir in search_roots:
         if not os.path.isdir(root_dir):
             continue
         for dirpath, dirnames, filenames in os.walk(root_dir):
             # Skip non-project directories in-place
             dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
-            if target in filenames:
-                full_path = os.path.abspath(os.path.join(dirpath, target))
-                if full_path not in seen:
-                    matches.append(full_path)
-                    seen.add(full_path)
+            if basename in filenames:
+                full_path = os.path.abspath(os.path.join(dirpath, basename))
+                norm_full = os.path.normpath(full_path)
+                norm_target = os.path.normpath(target)
+                
+                full_parts = [p for p in norm_full.split(os.sep) if p]
+                target_parts = [p for p in norm_target.split(os.sep) if p]
+                
+                if len(full_parts) >= len(target_parts):
+                    if full_parts[-len(target_parts):] == target_parts:
+                        if norm_full not in seen:
+                            matches.append(norm_full)
+                            seen.add(norm_full)
     return matches
 
 
